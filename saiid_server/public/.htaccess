@@ -1,0 +1,31 @@
+# CORS: إضافة PATCH لطلبات OPTIONS (تحديث المشروع / عدد المستفيدين) — يعمل على هوستنجر إذا الطلب يصل لمجلد public
+<IfModule mod_headers.c>
+    SetEnvIf Request_Method "OPTIONS" is_options
+    Header always set Access-Control-Allow-Origin "https://forms.saiid.org" env=is_options
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" env=is_options
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, Expires, If-Modified-Since, If-None-Match" env=is_options
+    Header always set Access-Control-Allow-Credentials "true" env=is_options
+    Header always set Access-Control-Max-Age "86400" env=is_options
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Handle Authorization Header
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Redirect Trailing Slashes If Not A Folder...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    # Send Requests To Front Controller...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>

@@ -1,0 +1,24 @@
+# ضروري: اسم الملف يجب أن يكون بالضبط .htaccess (نقطة في البداية)
+# ضروري: خدمة ملفات JS/CSS الحقيقية — يمنع خطأ MIME type
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  # لا تعيد كتابة طلبات js/ و assets/ و images/ و fonts/ أبداً
+  RewriteRule ^(js|assets|images|fonts)/ - [L]
+  # إذا الطلب لملف أو مجلد موجود — اخدمه كما هو
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  # غير ذلك: مسار SPA — أرجع index.html
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# MIME types صحيحة (يمنع أن يرجع السيرفر text/html لملفات .js والخطوط)
+<IfModule mod_mime.c>
+  AddType application/javascript .js
+  AddType text/css .css
+  AddType font/woff2 .woff2
+  AddType font/woff .woff
+  AddType font/ttf .ttf
+  AddType font/otf .otf
+</IfModule>

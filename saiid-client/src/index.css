@@ -1,0 +1,160 @@
+/* index.css */
+/* ✅ تحسين تحميل الخطوط: استخدام font-display: swap */
+/* ✅ استخدام الخط المحلي من @fontsource/cairo بدلاً من Google Fonts */
+@import '@fontsource/cairo/300.css';
+@import '@fontsource/cairo/400.css';
+@import '@fontsource/cairo/500.css';
+@import '@fontsource/cairo/600.css';
+@import '@fontsource/cairo/700.css';
+@import '@fontsource/cairo/800.css';
+@import '@fontsource/cairo/900.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply font-cairo antialiased;
+  }
+}
+
+@layer utilities {
+  .font-cairo {
+    /* ✅ Fallback fonts: Cairo, ثم Tajawal, ثم Segoe UI, ثم Arial, ثم sans-serif */
+    /* ✅ إذا فشل تحميل Cairo من Google Fonts، سيستخدم المتصفح الخطوط البديلة تلقائياً */
+    font-family: 'Cairo', 'Tajawal', 'Segoe UI', 'Arial', sans-serif;
+  }
+
+  /* Animation Classes */
+  .animate-blob {
+    animation: blob 7s infinite;
+  }
+
+  .animation-delay-2000 {
+    animation-delay: 2s;
+  }
+
+  .animation-delay-4000 {
+    animation-delay: 4s;
+  }
+}
+
+@keyframes blob {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+  }
+
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gradient-to-b from-sky-400 to-blue-500 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gradient-to-b from-sky-500 to-blue-600;
+}
+
+/* Selection */
+::selection {
+  @apply bg-sky-200 text-gray-900;
+}
+
+/* Focus Styles */
+*:focus-visible {
+  @apply outline-none ring-2 ring-sky-400 ring-offset-2;
+}
+
+/* Print Styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Toast Custom Styles */
+.toast-container {
+  font-family: 'Cairo', sans-serif;
+}
+
+.toast-wrapper {
+  @apply rounded-xl shadow-lg border-2;
+  min-height: 60px;
+  direction: rtl;
+}
+
+.toast-body {
+  @apply p-4 text-white;
+  font-family: 'Cairo', sans-serif;
+}
+
+.toast-progress {
+  @apply bg-white/30;
+}
+
+.toast-close-button {
+  @apply text-white/80 hover:text-white transition-colors p-1 rounded;
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.Toastify__toast--success {
+  @apply bg-gradient-to-r from-green-500 to-green-600 border-green-400 text-white;
+}
+
+.Toastify__toast--error {
+  @apply bg-gradient-to-r from-red-500 to-red-600 border-red-400 text-white;
+}
+
+.Toastify__toast--warning {
+  @apply bg-gradient-to-r from-orange-500 to-orange-600 border-orange-400 text-white;
+}
+
+.Toastify__toast--info {
+  @apply bg-gradient-to-r from-blue-500 to-blue-600 border-blue-400 text-white;
+}
+
+/* Ensure all text inside toasts is white */
+.Toastify__toast--success .toast-body,
+.Toastify__toast--error .toast-body,
+.Toastify__toast--warning .toast-body,
+.Toastify__toast--info .toast-body,
+.Toastify__toast--success span,
+.Toastify__toast--error span,
+.Toastify__toast--warning span,
+.Toastify__toast--info span {
+  @apply text-white;
+}
+
+/* Ensure icons are white */
+.Toastify__toast--success svg,
+.Toastify__toast--error svg,
+.Toastify__toast--warning svg,
+.Toastify__toast--info svg {
+  @apply text-white;
+}

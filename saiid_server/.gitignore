@@ -1,0 +1,44 @@
+/.phpunit.cache
+/node_modules
+/public/build
+/public/hot
+/public/storage
+# Ignore all folders inside public, but keep the root files
+/public/*/
+/MD/
+/storage/*.key
+/vendor
+.env
+.env.backup
+.env.production
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+auth.json
+npm-debug.log
+yarn-error.log
+/.fleet
+/.idea
+/.vscode
+
+# OS files
+desktop.ini
+.DS_Store
+Thumbs.db
+
+# Storage and logs
+/storage/logs/*
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+!/storage/logs/.gitignore
+!/storage/framework/.gitignore
+
+# Large files
+*.zip
+*.rar
+
+# Test files
+test*.php
+test*.html
+test*.ps1
