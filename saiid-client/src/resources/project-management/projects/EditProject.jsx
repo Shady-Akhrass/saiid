@@ -541,29 +541,23 @@ const EditProject = () => {
         return;
       }
 
-      // ✅ حفظ الملفات الجديدة في حالة مستقلة (لـ notes_images[])
-      setNewNoteImages(validFiles);
-
-      // ✅ استخدام أول صورة جديدة كصورة رئيسية قديمة (notes_image) للتوافقية
-      const mainFile = validFiles[0];
-      setFormData(prev => {
-        const updated = { ...prev, [name]: mainFile };
-        if (import.meta.env.DEV) {
-          console.log('✅ Main notes_image saved to formData (EditProject):', {
-            notes_image: updated.notes_image instanceof File ? 'File instance' : typeof updated.notes_image,
-            fileName: updated.notes_image instanceof File ? updated.notes_image.name : 'N/A'
-          });
+      // ✅ حفظ الملفات الجديدة (مع الاحتفاظ بالسابق)
+      setNewNoteImages(prev => {
+        const newFiles = [...prev, ...validFiles];
+        // تحديث الصورة الرئيسية للتوافقية
+        if (newFiles.length > 0) {
+          const mainFile = newFiles[0];
+          setFormData(f => ({ ...f, [name]: mainFile }));
+          // عرض معاينة لأول صورة فقط
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setNotesImagePreview(reader.result);
+            setExistingNotesImageUrl(null); // إخفاء الصور القديمة
+          };
+          reader.readAsDataURL(mainFile);
         }
-        return updated;
+        return newFiles;
       });
-
-      // عرض معاينة لأول صورة فقط
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNotesImagePreview(reader.result);
-        setExistingNotesImageUrl(null); // إخفاء الصور القديمة عند اختيار صور جديدة
-      };
-      reader.readAsDataURL(mainFile);
 
       // مسح خطأ الصورة إذا كان موجوداً
       if (errors.notes_image) {
@@ -668,24 +662,25 @@ const EditProject = () => {
   };
 
   // ✅ إزالة صورة جديدة من القائمة قبل الحفظ
-  const removeNewNoteImage = (index) => {
-    setNewNoteImages((prev) => prev.filter((_, i) => i !== index));
-    if (index === 0) {
-      // إذا أزلنا أول صورة جديدة، أعد تعيين notes_image والمعاينة
-      const remaining = newNoteImages.filter((_, i) => i !== index);
+  const removeNewNoteImage = (indexToRemove) => {
+    setNewNoteImages((prev) => {
+      const remaining = prev.filter((_, i) => i !== indexToRemove);
       if (remaining.length > 0) {
         const mainFile = remaining[0];
-        setFormData(prev => ({ ...prev, notes_image: mainFile }));
+        setFormData(f => ({ ...f, notes_image: mainFile }));
         const reader = new FileReader();
         reader.onloadend = () => {
           setNotesImagePreview(reader.result);
+          setExistingNotesImageUrl(null);
         };
         reader.readAsDataURL(mainFile);
       } else {
-        setFormData(prev => ({ ...prev, notes_image: null }));
+        setFormData(f => ({ ...f, notes_image: null }));
         setNotesImagePreview(null);
+        // لا نعيد الصور القديمة هنا إلا إذا أردنا ذلك، حالياً نتركها مخفية
       }
-    }
+      return remaining;
+    });
   };
 
   const handleSubmit = async (e) => {

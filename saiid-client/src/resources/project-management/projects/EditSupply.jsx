@@ -21,6 +21,9 @@ import {
   Folder,
   UserCheck,
   Users,
+  Calculator,
+  Banknote,
+  TrendingDown,
 } from 'lucide-react';
 import { OrphanSelectionWidget } from '../components/OrphanSelectionWidget';
 import { AssignProjectModal } from '../components/ProjectModals';
@@ -1132,6 +1135,121 @@ const EditSupply = () => {
                 </span>
               </div>
             </div>
+
+            {/* Financial Summary */}
+            { (() => {
+              const rate = parseFloat(project?.shekel_exchange_rate || 0);
+              const amountUSD = parseFloat(project?.amount_in_usd || 0);
+              const netAmountUSD = parseFloat(project?.net_amount || 0);
+              const finalILS = parseFloat(project?.net_amount_shekel || 0);
+              const hasConversion = finalILS > 0 && rate > 0;
+
+              // Compute ILS equivalents for cards that only have USD values
+              const amountILS = hasConversion ? amountUSD * rate : null;
+              const netAmountILS = hasConversion ? netAmountUSD * rate : null;
+
+              const fmtUSD = (v) => `${Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD`;
+              const fmtILS = (v) => `${Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} ILS`;
+
+              const shareBase = hasConversion ? finalILS : netAmountUSD;
+              const shareCurrency = hasConversion ? 'ILS' : 'USD';
+              const sharePerBeneficiary = beneficiariesCount > 0 ? shareBase / beneficiariesCount : 0;
+              const shareILS = hasConversion && beneficiariesCount > 0 ? sharePerBeneficiary : null;
+              const shareUSD = !hasConversion && beneficiariesCount > 0 ? sharePerBeneficiary : (hasConversion && rate > 0 && beneficiariesCount > 0 ? sharePerBeneficiary / rate : null);
+
+              const FinCard = ({ colorBg, colorBorder, colorIcon, colorLabel, colorMain, colorSub, icon: Icon, label, primary, secondary }) => (
+                <div className={`${colorBg} p-4 rounded-2xl border ${colorBorder} flex flex-col items-center text-center`}>
+                  <div className={`p-2.5 ${colorIcon} rounded-xl mb-2`}>
+                    <Icon size={20} />
+                  </div>
+                  <p className={`text-xs ${colorLabel} font-medium mb-1`}>{label}</p>
+                  <p className={`${colorMain} font-bold text-base leading-tight`}>{primary}</p>
+                  {secondary && <p className={`text-[11px] ${colorSub} mt-0.5`}>{secondary}</p>}
+                </div>
+              );
+
+              return (
+                <div className="mt-8 pt-6 border-t border-gray-100">
+                  <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <Banknote className="text-emerald-500" size={22} />
+                    ملخص مالي
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                    {/* Beneficiaries */}
+                    <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col items-center text-center">
+                      <div className="p-2.5 bg-blue-100 text-blue-600 rounded-xl mb-2"><Users size={20} /></div>
+                      <p className="text-xs text-blue-800 font-medium mb-1">المستفيدين</p>
+                      <p className="text-blue-900 font-bold text-base leading-tight">{beneficiariesCount || 0}</p>
+                    </div>
+
+                    {/* Exchange Rate */}
+                    <div className="bg-sky-50/50 p-4 rounded-2xl border border-sky-100 flex flex-col items-center text-center">
+                      <div className="p-2.5 bg-sky-100 text-sky-600 rounded-xl mb-2"><DollarSign size={20} /></div>
+                      <p className="text-xs text-sky-800 font-medium mb-1">سعر الصرف</p>
+                      {hasConversion ? (
+                        <>
+                          <p className="text-sky-900 font-bold text-base leading-tight">{rate.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                          <p className="text-[11px] text-sky-600 mt-0.5">1 USD = {rate} ILS</p>
+                        </>
+                      ) : (
+                        <p className="text-sky-400 text-sm mt-1">لم يتم التحويل</p>
+                      )}
+                    </div>
+
+                    {/* Before Admin Discount */}
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col items-center text-center">
+                      <div className="p-2.5 bg-slate-200 text-slate-600 rounded-xl mb-2"><DollarSign size={20} /></div>
+                      <p className="text-xs text-slate-700 font-medium mb-1">قبل الخصم الإداري</p>
+                      <p className="text-slate-900 font-bold text-base leading-tight">{fmtUSD(amountUSD)}</p>
+                      {amountILS && <p className="text-[11px] text-slate-500 mt-0.5">{fmtILS(amountILS)}</p>}
+                    </div>
+
+                    {/* Before Transport Discount */}
+                    <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 flex flex-col items-center text-center">
+                      <div className="p-2.5 bg-amber-100 text-amber-600 rounded-xl mb-2"><TrendingDown size={20} /></div>
+                      <p className="text-xs text-amber-800 font-medium mb-1">قبل خصم النقل</p>
+                      <p className="text-amber-900 font-bold text-base leading-tight">{fmtUSD(netAmountUSD)}</p>
+                      {netAmountILS && <p className="text-[11px] text-amber-600 mt-0.5">{fmtILS(netAmountILS)}</p>}
+                    </div>
+
+                    {/* After All Discounts */}
+                    <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100 flex flex-col items-center text-center">
+                      <div className="p-2.5 bg-emerald-100 text-emerald-600 rounded-xl mb-2"><Banknote size={20} /></div>
+                      <p className="text-xs text-emerald-800 font-medium mb-1">بعد الخصومات</p>
+                      {hasConversion ? (
+                        <>
+                          <p className="text-emerald-900 font-bold text-base leading-tight">{fmtILS(finalILS)}</p>
+                          <p className="text-[11px] text-emerald-600 mt-0.5">{fmtUSD(netAmountUSD)}</p>
+                        </>
+                      ) : (
+                        <p className="text-emerald-900 font-bold text-base leading-tight">{fmtUSD(netAmountUSD)}</p>
+                      )}
+                    </div>
+
+                    {/* Per Beneficiary Share */}
+                    <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100 flex flex-col items-center text-center shadow-sm">
+                      <div className="p-2.5 bg-indigo-100 text-indigo-600 rounded-xl mb-2"><Calculator size={20} /></div>
+                      <p className="text-xs text-indigo-800 font-medium mb-1">نصيب المستفيد</p>
+                      {beneficiariesCount > 0 ? (
+                        <>
+                          <p className="text-indigo-900 font-bold text-base leading-tight">
+                            {sharePerBeneficiary.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} {shareCurrency}
+                          </p>
+                          {hasConversion && shareUSD && (
+                            <p className="text-[11px] text-indigo-500 mt-0.5">
+                              {shareUSD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-indigo-400 text-sm mt-1">0.00</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })() }
+
             {/* 💱 Shekel Conversion Info & Edit Button */ }
             { project && (
               <div className="mt-4 pt-4 border-t border-gray-200">

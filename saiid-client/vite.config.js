@@ -192,7 +192,7 @@ export default defineConfig({
     // ملاحظة: هذا يتطلب تحديث VITE_API_URL في .env لاستخدام proxy
     proxy: {
       '/api': {
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,
@@ -220,7 +220,7 @@ export default defineConfig({
       },
       // ✅ Proxy للصور (project_notes_images, orphan_photos, etc.)
       '/project_notes_images': {
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path, // لا نعيد كتابة المسار
@@ -252,7 +252,7 @@ export default defineConfig({
       },
       // ✅ Proxy للمسارات الأخرى (storage, public/storage)
       '/storage': {
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,
@@ -271,7 +271,7 @@ export default defineConfig({
         },
       },
       '/public': {
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,

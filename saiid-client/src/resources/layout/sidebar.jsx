@@ -1,7 +1,7 @@
 // Sidebar.jsx
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { X, LayoutDashboard, Plus, FolderKanban, FileText, Coins, Users, UsersRound, Bell, BarChart3, Heart, Stethoscope, Home, DollarSign, Package, Tag, CheckCircle, Settings, Archive } from "lucide-react";
+import { X, LayoutDashboard, Plus, FolderKanban, FileText, Coins, Users, UsersRound, Bell, BarChart3, Heart, Stethoscope, Home, DollarSign, Package, Tag, CheckCircle, Settings, Archive, FolderOpen } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import apiClient from "../../utils/axiosConfig";
 
@@ -597,26 +597,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
           route: "projects",
           icon: <FolderKanban className="w-5 h-5" />,
         },
-        {
-          name: "orphans",
-          label: "الايتام",
-          route: "orphans",
-          icon: (
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-              />
-            </svg>
-          ),
-        },
+
         {
           name: "pmFinishedProjects",
           label: "المشاريع المنتهية",
@@ -746,25 +727,12 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
           route: "projects/advanced",
           icon: <Settings className="w-5 h-5" />,
         },
+
         {
-          name: "orphan-groupings",
-          label: "مجموعات الأيتام",
-          route: "orphan-groupings",
-          icon: (
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
-            </svg>
-          ),
+          name: "pmSponsorshipGroups",
+          label: "مجموعات الكفالات",
+          route: "sponsorship-groups",
+          icon: <FolderOpen className="w-5 h-5" />,
         },
         {
           name: "forms-control",
@@ -962,6 +930,12 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
               />
             </svg>
           ),
+        },
+        {
+          name: "pmSponsorshipGroups",
+          label: "مجموعات الكفالات",
+          route: "sponsorship-groups",
+          icon: <FolderOpen className="w-5 h-5" />,
         },
         {
           name: "pmNotifications",

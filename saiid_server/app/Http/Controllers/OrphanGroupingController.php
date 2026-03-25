@@ -6,7 +6,7 @@ use App\Models\Orphan;
 use App\Models\OrphanGrouping;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Log;
+use Illuminate\Support\Facades\Log;
 
 /**
  * OrphanGrouping Controller
@@ -273,9 +273,14 @@ class OrphanGroupingController extends Controller
 
         try {
             $grouping = OrphanGrouping::findOrFail($id);
-
+            
+            // Detach all active orphans before deleting
             if ($grouping->current_count > 0) {
-                return $this->errorResponse('فشل الحذف', 'Cannot delete grouping with active members', 422);
+                Log::info("Detaching {$grouping->current_count} orphans from grouping ID: {$id} before deletion.");
+                $orphanIds = $grouping->activeOrphans()->pluck('orphans.orphan_id_number')->toArray();
+                foreach ($orphanIds as $orphanId) {
+                    $grouping->removeOrphan($orphanId, OrphanGrouping::MEMBER_STATUS_INACTIVE, 'Group deleted');
+                }
             }
 
             $grouping->delete();
@@ -382,7 +387,12 @@ class OrphanGroupingController extends Controller
             $grouping = OrphanGrouping::findOrFail($id);
 
             // Get active orphans for this grouping and apply any user filters (e.g., search, gender)
-            $query = $grouping->activeOrphans();
+            $query = $grouping->activeOrphans()
+                ->with(['sponsoredProjects' => function($q) {
+                    $q->select('project_proposals.id', 'project_proposals.project_name')
+                      ->withPivot('sponsorship_amount', 'is_recurring', 'sponsorship_start_date', 'sponsorship_end_date');
+                }]);
+            
             $query = $this->applyOrphanFilters($query, $request->all(), $grouping);
             $orphans = $query->get();
 
@@ -410,7 +420,7 @@ class OrphanGroupingController extends Controller
         try {
             $validated = $request->validate([
                 'orphan_ids' => 'required|array',
-                'orphan_ids.*' => 'exists:orphans,id',
+                'orphan_ids.*' => 'exists:orphans,orphan_id_number',
                 'status' => 'sometimes|required|in:inactive,transferred,graduated',
                 'notes' => 'nullable|string|max:500',
             ]);

@@ -7,6 +7,46 @@ import { Save, ArrowRight, DollarSign, Calculator, Image as ImageIcon, X as XIco
 import Unauthorized from '../components/Unauthorized';
 import { useCacheInvalidation } from '../../../hooks/useCacheInvalidation';
 
+// Image preview component
+const NoteImagePreview = ({ file, index, onRemove }) => {
+  const [previewUrl, setPreviewUrl] = useState(null);
+
+  useEffect(() => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPreviewUrl(reader.result);
+    };
+    reader.readAsDataURL(file);
+  }, [file]);
+
+  return (
+    <div
+      key={`${file.name}-${index}`}
+      className="relative rounded-xl border-2 border-sky-200 overflow-hidden bg-gray-50"
+    >
+      {previewUrl ? (
+        <img
+          src={previewUrl}
+          alt={file.name}
+          className="w-full h-28 object-cover"
+        />
+      ) : (
+        <div className="flex items-center justify-center h-28 text-xs text-gray-500">
+          جاري التحميل...
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => onRemove(index)}
+        className="absolute top-2 left-2 px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 bg-red-600 text-white hover:bg-red-700"
+      >
+        <XIcon className="w-3 h-3" />
+        إزالة
+      </button>
+    </div>
+  );
+};
+
 const NewProject = () => {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -408,19 +448,19 @@ const NewProject = () => {
         return;
       }
 
-      // ✅ حفظ جميع الصور المختارة في حالة مستقلة لاستخدام notes_images[]
-      setNoteImages(validFiles);
-
-      // ✅ استخدام أول صورة كصورة رئيسية قديمة (notes_image) للتوافقية
-      const mainFile = validFiles[0];
-      setFormData({ ...formData, [name]: mainFile });
-
-      // عرض معاينة لأول صورة فقط (للتبسيط)
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNotesImagePreview(reader.result);
-      };
-      reader.readAsDataURL(mainFile);
+      // ✅ حفظ جميع الصور المختارة (مع الاحتفاظ بالسابق)
+      setNoteImages(prev => {
+        const newFiles = [...prev, ...validFiles];
+        // تحديث الصورة الرئيسية للتوافقية
+        if (newFiles.length > 0) {
+          const mainFile = newFiles[0];
+          setFormData(f => ({ ...f, [name]: mainFile }));
+          const reader = new FileReader();
+          reader.onloadend = () => setNotesImagePreview(reader.result);
+          reader.readAsDataURL(mainFile);
+        }
+        return newFiles;
+      });
 
       // مسح خطأ الصورة إذا كان موجوداً
       if (errors.notes_image) {
@@ -444,6 +484,25 @@ const NewProject = () => {
     if (fileInput) {
       fileInput.value = '';
     }
+  };
+
+  const removeSpecificImage = (indexToRemove) => {
+    setNoteImages(prev => {
+      const remaining = prev.filter((_, i) => i !== indexToRemove);
+      if (remaining.length > 0) {
+        const mainFile = remaining[0];
+        setFormData(f => ({ ...f, notes_image: mainFile }));
+        const reader = new FileReader();
+        reader.onloadend = () => setNotesImagePreview(reader.result);
+        reader.readAsDataURL(mainFile);
+      } else {
+        setFormData(f => ({ ...f, notes_image: null }));
+        setNotesImagePreview(null);
+        const fileInput = document.getElementById('notes_image_input_new');
+        if (fileInput) fileInput.value = '';
+      }
+      return remaining;
+    });
   };
 
   const validateForm = () => {
@@ -1530,22 +1589,20 @@ const NewProject = () => {
                   <p className="text-sm text-red-600">{errors.notes_image}</p>
                 )}
 
-                {/* Image Preview */}
-                {notesImagePreview && (
-                  <div className="relative bg-gray-50 rounded-xl p-4 border-2 border-gray-200">
-                    <button
-                      type="button"
-                      onClick={handleRemoveImage}
-                      className="absolute top-2 left-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors z-10"
-                      title="إزالة الصورة"
-                    >
-                      <XIcon className="w-4 h-4" />
-                    </button>
-                    <img
-                      src={notesImagePreview}
-                      alt="معاينة صورة الملاحظات"
-                      className="w-full h-auto rounded-lg max-h-64 object-contain"
-                    />
+                {/* Image Previews */}
+                {(noteImages.length > 0 || notesImagePreview) && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">الصور المختارة:</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {noteImages.map((file, index) => (
+                        <NoteImagePreview
+                          key={`${file.name}-${index}`}
+                          file={file}
+                          index={index}
+                          onRemove={removeSpecificImage}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

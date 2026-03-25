@@ -974,3 +974,25 @@ Route::middleware(['auth:sanctum', 'role:admin,orphan_sponsor_coordinator,execut
     Route::post('/orphan-groupings/check-sponsorship', [OrphanGroupingController::class, 'checkSponsorshipStatus']);
 });
 
+// ✅ Sponsorship Groups Routes - Admin Only
+use App\Http\Controllers\SponsorshipGroupController;
+
+Route::middleware(['auth:sanctum', 'role:admin,orphan_sponsor_coordinator,executed_projects_coordinator'])->group(function () {
+    // Group CRUD
+    Route::get('/sponsorship-groups', [SponsorshipGroupController::class, 'index']);
+    Route::post('/sponsorship-groups', [SponsorshipGroupController::class, 'store']);
+    Route::get('/sponsorship-groups/{id}', [SponsorshipGroupController::class, 'show']);
+    Route::put('/sponsorship-groups/{id}', [SponsorshipGroupController::class, 'update']);
+    Route::delete('/sponsorship-groups/{id}', [SponsorshipGroupController::class, 'destroy']);
+
+    // Item CRUD
+    Route::get('/sponsorship-groups/{id}/items', [SponsorshipGroupController::class, 'items']);
+    Route::post('/sponsorship-groups/{id}/items', [SponsorshipGroupController::class, 'storeItem']);
+    Route::put('/sponsorship-groups/{groupId}/items/{itemId}', [SponsorshipGroupController::class, 'updateItem']);
+    Route::delete('/sponsorship-groups/{groupId}/items/{itemId}', [SponsorshipGroupController::class, 'deleteItem']);
+    Route::post('/sponsorship-groups/{groupId}/items/{itemId}/remove-image', [SponsorshipGroupController::class, 'removeImage']);
+
+    // Create as project
+    Route::post('/sponsorship-groups/{id}/create-as-project', [SponsorshipGroupController::class, 'createAsProject']);
+});
+

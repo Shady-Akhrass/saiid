@@ -91,6 +91,8 @@ const PMSurplusCategoryDetails = React.lazy(() => import('./resources/project-ma
 const PMBeneficiariesStatistics = React.lazy(() => import('./resources/project-management/beneficiaries/BeneficiariesStatistics.jsx'));
 const PMBeneficiariesManagement = React.lazy(() => import('./resources/project-management/beneficiaries/BeneficiariesManagement.jsx'));
 const PMAdvancedProjectsManagement = React.lazy(() => import('./resources/project-management/projects/AdvancedProjectsManagement.jsx'));
+const PMSponsorshipGroups = React.lazy(() => import('./resources/project-management/sponsorship/SponsorshipGroups.jsx'));
+const PMSponsorshipItems = React.lazy(() => import('./resources/project-management/sponsorship/SponsorshipItems.jsx'));
 
 // Media Management System
 const MediaDashboard = React.lazy(() => import('./resources/media-management/Dashboard.jsx'));
@@ -189,6 +191,10 @@ function App() {
               <Route path="/surplus/categories/new" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><PMSurplusCategoryForm /></Base></Suspense> } /> } />
               <Route path="/surplus/categories/:id/edit" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><PMSurplusCategoryForm /></Base></Suspense> } /> } />
               <Route path="/surplus/categories/:id" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><PMSurplusCategoryDetails /></Base></Suspense> } /> } />
+
+              {/* Sponsorship Groups Routes */ }
+              <Route path="/project-management/sponsorship-groups" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><PMSponsorshipGroups /></Base></Suspense> } /> } />
+              <Route path="/project-management/sponsorship-groups/:id/items" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><PMSponsorshipItems /></Base></Suspense> } /> } />
 
               {/* Media Management System Routes */ }
               <Route path="/media-management/dashboard" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><MediaDashboard /></Base></Suspense> } /> } />
