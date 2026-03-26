@@ -584,7 +584,7 @@ const ProjectsList = () => {
     project_type: [], // ✅ مصفوفة لدعم الاختيار المتعدد
     startDate: '',
     endDate: '',
-    team_id: '',
+    researcher_id: '',
     photographer_id: '',
     shelter_id: '',
     governorate: '',
@@ -2467,8 +2467,8 @@ const ProjectsList = () => {
       if (exportFilters.endDate) {
         params.end_date = exportFilters.endDate;
       }
-      if (exportFilters.team_id) {
-        params.team_id = exportFilters.team_id;
+      if (exportFilters.researcher_id) {
+        params.researcher_id = exportFilters.researcher_id;
       }
       if (exportFilters.photographer_id) {
         params.photographer_id = exportFilters.photographer_id;
@@ -9298,21 +9298,21 @@ const ProjectsList = () => {
                 </h4>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* الفريق */}
+                  {/* الباحث */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      الفريق المكلف
+                      الباحث
                     </label>
                     <select
-                      value={exportFilters.team_id}
-                      onChange={(e) => setExportFilters({ ...exportFilters, team_id: e.target.value })}
+                      value={exportFilters.researcher_id}
+                      onChange={(e) => setExportFilters({ ...exportFilters, researcher_id: e.target.value })}
                       disabled={isDownloading || loadingFilterData}
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     >
-                      <option value="">جميع الفرق</option>
-                      {teams.map(team => (
-                        <option key={team.id || team._id} value={team.id || team._id}>
-                          {team.team_name || team.name || '-'}
+                      <option value="">جميع الباحثين</option>
+                      {researchers.map(researcher => (
+                        <option key={researcher.id || researcher._id} value={researcher.id || researcher._id}>
+                          {researcher.name || researcher.full_name || '-'}
                         </option>
                       ))}
                     </select>
@@ -9609,9 +9609,9 @@ const ProjectsList = () => {
                       تنفيذ إلى: {exportFilters.endDate}
                     </span>
                   )}
-                  {exportFilters.team_id && (
+                  {exportFilters.researcher_id && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      الفريق: {teams.find(t => (t.id || t._id) == exportFilters.team_id)?.team_name || exportFilters.team_id}
+                      الباحث: {researchers.find(r => (r.id || r._id) == exportFilters.researcher_id)?.name || researchers.find(r => (r.id || r._id) == exportFilters.researcher_id)?.full_name || exportFilters.researcher_id}
                     </span>
                   )}
                   {exportFilters.photographer_id && (
@@ -9675,7 +9675,7 @@ const ProjectsList = () => {
                     </span>
                   )}
                   {!exportFilters.status && (!Array.isArray(exportFilters.project_type) || exportFilters.project_type.length === 0) && !exportFilters.startDate && !exportFilters.endDate &&
-                    !exportFilters.team_id && !exportFilters.photographer_id && !exportFilters.shelter_id &&
+                    !exportFilters.researcher_id && !exportFilters.photographer_id && !exportFilters.shelter_id &&
                     !exportFilters.governorate && !exportFilters.district && !exportFilters.donor_name &&
                     !exportFilters.donor_code && !exportFilters.quantity_min && !exportFilters.quantity_max &&
                     !exportFilters.cost_min && !exportFilters.cost_max && !exportFilters.created_at_start &&

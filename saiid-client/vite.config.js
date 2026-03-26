@@ -250,6 +250,35 @@ export default defineConfig({
           });
         },
       },
+      // ✅ Proxy للصور (orphan_photos)
+      '/orphan_photos': {
+        target: 'https://forms-api.saiid.org',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('⚠️ Proxy error for orphan_photos:', err.message);
+          });
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log('📸 Proxying orphan_photos request:', req.method, req.url, '→', proxyReq.path);
+          });
+          proxy.on('proxyRes', (proxyRes, req, _res) => {
+            if (!proxyRes.headers['access-control-allow-origin']) {
+              proxyRes.headers['access-control-allow-origin'] = '*';
+            }
+            if (!proxyRes.headers['access-control-allow-methods']) {
+              proxyRes.headers['access-control-allow-methods'] = 'GET, OPTIONS';
+            }
+            if (!proxyRes.headers['access-control-allow-headers']) {
+              proxyRes.headers['access-control-allow-headers'] = 'Content-Type, Authorization, Accept';
+            }
+            if (!proxyRes.headers['content-type']) {
+              proxyRes.headers['content-type'] = 'image/jpeg';
+            }
+          });
+        },
+      },
       // ✅ Proxy للمسارات الأخرى (storage, public/storage)
       '/storage': {
         target: 'http://localhost:8000',

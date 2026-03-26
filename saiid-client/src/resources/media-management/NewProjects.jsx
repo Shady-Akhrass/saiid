@@ -674,6 +674,19 @@ const NewProjects = () => {
                     </div>
                   ) }
 
+                  {/* المصور المسند */ }
+                  { (project.assigned_photographer?.name || project.assigned_photographer_id || project.photographer?.name || project.photographer?.id) && (
+                    <div className="flex items-start gap-2 text-sm">
+                      <span className="font-semibold text-gray-700 min-w-[100px]">المصور:</span>
+                      <span className="text-gray-600 flex-1 flex items-center gap-2">
+                        <Camera className="w-4 h-4 text-orange-600" />
+                        { project.assigned_photographer?.name ||
+                          project.photographer?.name ||
+                          `المصور #${project.assigned_photographer_id || project.photographer?.id}` }
+                      </span>
+                    </div>
+                  ) }
+
                   {/* عرض وتنزيل الصورة */ }
                   { (project.notes_image_url || project.image_url) && (
                     <div className="flex items-start gap-2 text-sm">

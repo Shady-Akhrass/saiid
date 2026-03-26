@@ -673,25 +673,10 @@ const NewProject = () => {
               formDataToSend.append('notes_images[]', file, file.name);
             }
           });
-        }
-        // ✅ التأكد من إرسال الملف بشكل صحيح
-        if (formData.notes_image instanceof File) {
-          // ✅ Debug: عرض معلومات الملف قبل الإرسال
-          console.log('📸 Sending file:', {
-            name: formData.notes_image.name,
-            type: formData.notes_image.type,
-            size: formData.notes_image.size,
-            lastModified: formData.notes_image.lastModified
-          });
-
-          // ✅ إرسال الملف مع اسمه - axios سيتعامل مع نوع MIME تلقائياً
+        } else if (formData.notes_image instanceof File) {
+          // ✅ التأكد من إرسال الملف بشكل صحيح في حالة وجود صورة واحدة فقط بالطريقة القديمة
           formDataToSend.append('notes_image', formData.notes_image, formData.notes_image.name);
-
-          // ✅ التحقق من أن الملف تم إضافته بشكل صحيح
-          const fileEntry = formDataToSend.get('notes_image');
-          console.log('✅ File added to FormData:', fileEntry instanceof File ? 'Yes' : 'No', fileEntry);
-        } else {
-          console.warn('⚠️ notes_image is not a File instance:', formData.notes_image);
+        } else if (formData.notes_image) {
           formDataToSend.append('notes_image', formData.notes_image);
         }
         formDataToSend.append('is_divided_into_phases', isDividedIntoPhasesNum);
