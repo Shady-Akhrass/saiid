@@ -496,7 +496,7 @@ const ProjectsList = () => {
     project_type: [], // ✅ تغيير إلى مصفوفة لدعم الاختيار المتعدد
     searchQuery: '',
     page: 1,
-    perPage: 'all', // ✅ القيمة الافتراضية: الكل
+    perPage: isFinishedProjectsPage ? 50 : 'all', // ✅ افتراضي 50 للمنتهية، 25 للبقية
     phase_day: '', // فلترة حسب اليوم (للمشاريع اليومية)
     parent_project_id: '', // فلترة حسب المشروع الأصلي
     subcategory_id: [], // ✅ تغيير إلى مصفوفة لدعم الاختيار المتعدد
@@ -1083,12 +1083,15 @@ const ProjectsList = () => {
 
     // ✅ إذا كانت البيانات موجودة في cache وحديثة ونفس الفلاتر، استخدمها مباشرة
     // ✅ التحقق من أن البيانات ليست فارغة
+    // ✅ لكن إذا تغيرت الفلاتر، جلب بيانات جديدة دائماً
+    const filtersChanged = cache.filters !== filtersKey;
     if (cache.data &&
       Array.isArray(cache.data) &&
       cache.data.length > 0 &&
       cache.filters === filtersKey &&
       cache.timestamp &&
-      (now - cache.timestamp) < cache.maxAge) {
+      (now - cache.timestamp) < cache.maxAge &&
+      !filtersChanged) {
       // ✅ عرض المشاريع كما يرسلها الـ API: أصلية + فرعية (اليومية/الشهرية) عند بدء إجراء أو تم التوريد وما بعد
       // ✅ لا نستبعد المشاريع الفرعية؛ الـ API يرسل فقط الفرعية المسموح بعرضها حسب الحالة
       let filteredCacheData = cache.data;
@@ -1114,7 +1117,8 @@ const ProjectsList = () => {
       }
     }
 
-    // ✅ فقط إذا لم تكن البيانات في cache، اجلبها من API
+    // ✅ جلب البيانات دائماً عند تحميل الصفحة أو تغيير الفلاتر
+    // ✅ لا نعتمد على cache فقط - نجلب دائماً لضمان البيانات المحدثة
     fetchProjects();
 
     // ✅ تنظيف: إلغاء الطلب عند unmount أو تغيير filters
@@ -1372,75 +1376,38 @@ const ProjectsList = () => {
 
       // ✅ إنشاء params من filters مع إزالة القيم الفارغة
       const params = {};
-      let shouldFetchAll = false; // ✅ متغير لتتبع إذا كان المستخدم يريد جلب جميع المشاريع
 
       Object.keys(filters).forEach(key => {
         const value = filters[key];
         // ✅ إرسال فقط القيم غير الفارغة (ليس '' أو null أو undefined)
         if (value !== '' && value !== null && value !== undefined) {
-          // ✅ إذا كان perPage = 'all'، نرسل قيمة كبيرة جداً للـ Backend لجلب جميع المشاريع
-          if (key === 'perPage' && (value === 'all' || value === 'الكل')) {
-            shouldFetchAll = true;
-            params.per_page = 2000; // ✅ حد أقصى آمن لتجنب تجاوز حد الذاكرة في Backend
-            params.perPage = 2000;
-          } else if (key === 'perPage') {
-            // ✅ إذا كان perPage رقم، نرسله مباشرة
-            const perPageNum = typeof value === 'number' ? value : parseInt(value);
+          if (key === 'perPage') {
+            const perPageNum = value === 'all' || value === 'الكل' ? 500 : (typeof value === 'number' ? value : parseInt(value));
             if (!isNaN(perPageNum) && perPageNum > 0) {
               params.per_page = perPageNum;
               params.perPage = perPageNum;
             }
+          } else if (key === 'status' && Array.isArray(value) && value.length > 0) {
+            params.status = value.join(',');
+          } else if (key === 'project_type' && Array.isArray(value) && value.length > 0) {
+            params.project_type = value.join(',');
+          } else if (key === 'subcategory_id' && Array.isArray(value) && value.length > 0) {
+            params.subcategory_id = value.join(',');
           } else {
             params[key] = value;
           }
         }
       });
 
-      // ✅ إذا كان هناك ترتيب حسب التاريخ وكان المستخدم يريد "عرض الكل"، نستخدم قيمة كبيرة
-      if (shouldFetchAll && (params.sort_by === 'created_at' || params.sort_by === 'updated_at' ||
-        params.order_by === 'created_at' || params.order_by === 'updated_at' ||
-        params.sort === 'created_at' || params.sort === 'updated_at' ||
-        sortConfig?.key === 'created_at' || sortConfig?.key === 'updated_at')) {
-        params.per_page = 2000; // ✅ حد أقصى آمن
-        params.perPage = 2000;
-      } else if (!shouldFetchAll && (params.sort_by === 'created_at' || params.sort_by === 'updated_at' ||
-        params.order_by === 'created_at' || params.order_by === 'updated_at' ||
-        params.sort === 'created_at' || params.sort === 'updated_at' ||
-        sortConfig?.key === 'created_at' || sortConfig?.key === 'updated_at')) {
-        params.per_page = 100; // ✅ تقليل من 10000 إلى 100 لتحسين الأداء
-        params.perPage = 100;
-      }
-
-      // ✅ إذا كان المستخدم مدير مشاريع، نطلب جميع المشاريع بدون فلترة في Backend
-      // سنفلترها في Frontend
+      // ✅ إذا كان المستخدم مدير مشاريع، نطلب المشاريع مع مراعاة النافذة الزمنية
       if (isProjectManager) {
-        // ✅ إزالة جميع الفلاتر لمدير المشاريع - نريد جميع المشاريع بكل الحالات
-        // سنطبق الفلترة في Frontend
-        delete params.status;
-        delete params.project_type;
-        delete params.searchQuery;
-
-        // ✅ لمدير المشاريع: حد أقصى 2000 لتجنب تجاوز حد الذاكرة في Backend
-        if (!shouldFetchAll) {
-          params.per_page = 100;
-          params.perPage = 100;
-        } else {
-          params.per_page = Math.min(params.per_page || 2000, 2000);
-          params.perPage = params.per_page;
-        }
-
+        // ✅ لمدير المشاريع: نستخدم pagination العادي (25 أو 50... إلخ)
         // إضافة معاملات لجلب جميع المشاريع بما فيها المنفذة و"وصل للمتبرع"
         params.include_non_divided = true;
         // ✅ لـ Project Manager: نطلب فقط المشاريع اليومية من النافذة (اليوم + 3 أيام قادمة)
-        // بدلاً من جميع المشاريع اليومية
-        params.include_daily_phases_window_only = true; // ✅ معامل للـ Backend
-        params.daily_phases_window_size = 4; // ✅ اليوم الحالي + 3 أيام قادمة (4 مراحل inclusive)
-        params.include_monthly_phases = true; // ✅ إضافة المشاريع الشهرية
-        // ❌ إزالة المعاملات التي قد تسبب مشاكل في Backend (Undefined variable $request)
-        // params.include_executed = true; // ❌ تم إزالته - قد لا يكون مدعوم في Backend
-        // params.include_all_statuses = true; // ❌ تم إزالته - قد لا يكون مدعوم في Backend
-        // params.include_delivered_to_donor = true; // ❌ تم إزالته - قد لا يكون مدعوم في Backend
-
+        params.include_daily_phases_window_only = true;
+        params.daily_phases_window_size = 4;
+        params.include_monthly_phases = true;
       }
 
       // ✅ إذا كان المستخدم منسق المشاريع المنفذة، نطلب جميع المشاريع من /projects
@@ -1462,8 +1429,8 @@ const ProjectsList = () => {
       if (isOrphanSponsorCoordinator) {
         // ✅ طلب جميع المشاريع بدون أي فلترة من الـ Backend
         // ✅ حد أقصى 2000 لتجنب تجاوز حد الذاكرة في Backend
-        params.per_page = 2000;
-        params.perPage = 2000;
+        params.per_page = 4000;
+        params.perPage = 4000;
         shouldFetchAll = true;
         // ✅ طلب المشاريع الأصلية المقسمة مع علاقة monthly_phases حتى يظهر الشهر 1 (فبراير) وغيره
         params.include_monthly_phases = true;
@@ -1475,15 +1442,10 @@ const ProjectsList = () => {
       // ✅ للإدارة: المشاريع غير المقسمة + المشاريع الأصلية المقسمة فقط
       // ❌ لا نطلب المشاريع الفرعية (اليومية والشهرية)
       if (isAdmin) {
-        // ✅ للإدارة: تم تقليل الصفحة الافتراضية إلى 50 لتجنب بطء الاستجابة و timeout (Timeout 20s)
-        // 500 كافية لجميع المشاريع عند طلب "الكل" (حالياً ~280)
-        const adminMaxPerPage = 500;
+        // ✅ للإدارة: نستخدم pagination العادي
         if (!params.per_page) {
-          params.per_page = 50;
-          params.perPage = 50;
-        } else if (params.per_page > adminMaxPerPage) {
-          params.per_page = adminMaxPerPage;
-          params.perPage = adminMaxPerPage;
+          params.per_page = isFinishedProjectsPage ? 50 : 25;
+          params.perPage = params.per_page;
         }
 
         // ✅ إضافة معاملات لجلب جميع المشاريع (غير المقسمة والمقسمة الأصلية)
@@ -1513,7 +1475,7 @@ const ProjectsList = () => {
         // params.include_all_statuses = true; // ❌ تم إزالته - قد لا يكون مدعوم في Backend
 
       }
-// section two start here //***** 
+      // section two start here //***** 
       // ✅ timeout أعلى لطلبات المشاريع الكبيرة لتجنب ECONNABORTED
       // - في الإنتاج: حتى 30 ثانية للطلبات الكبيرة
       // - في التطوير: حتى 20 ثانية (يمكنك تقليلها إذا أصبح البطء مزعجاً)
@@ -1729,7 +1691,7 @@ const ProjectsList = () => {
             current_page: currentPage,
             last_page: response.data.totalPages || response.data.data?.last_page || response.data.last_page || 1,
             per_page: response.data.perPage || response.data.data?.per_page || response.data.per_page || 10,
-            total: actualTotal, // ✅ استخدام actualTotal (280) للحسابات الصحيحة
+            total: actualTotal,
           });
         } else {
           if (import.meta.env.DEV) {
@@ -2031,14 +1993,7 @@ const ProjectsList = () => {
     setFilters(prev => ({ ...prev, page: newPage }));
   }, []);
 
-  // ✅ لمنسق الكفالات: ضبط perPage تلقائياً إلى 'all' عند تحميل الصفحة
-  useEffect(() => {
-    if (isOrphanSponsorCoordinator && filters.perPage !== 'all' && filters.perPage !== 'الكل') {
-      if (import.meta.env.DEV) {
-      }
-      setFilters(prev => ({ ...prev, perPage: 'all', page: 1 }));
-    }
-  }, [isOrphanSponsorCoordinator]); // ✅ فقط عند تغيير الدور
+  // ✅ ملاحظة: تمت إزالة useEffect التي كانت تفرض perPage = 'all' لدعم pagination السيرفر
 
   // دالة لتغيير عدد المشاريع المعروضة في الصفحة
   const handlePerPageChange = useCallback((newPerPage) => {
@@ -2055,21 +2010,12 @@ const ProjectsList = () => {
         direction = 'desc';
       }
 
-      // ✅ إذا كان الترتيب حسب التاريخ، نستخدم pagination عادي
-      if (key === 'created_at' || key === 'updated_at') {
-        setFilters(prevFilters => ({ ...prevFilters, perPage: 100 })); // ✅ تقليل من 10000 إلى 100
-      }
+      // ✅ إعادة تعيين الصفحة إلى 1 عند تغيير الترتيب لضمان اتساق البيانات
+      setFilters(prevFilters => ({ ...prevFilters, page: 1 }));
 
       return { key, direction };
     });
   }, []);
-
-  // ✅ ضبط perPage تلقائياً لمدير المشاريع عند التحميل
-  useEffect(() => {
-    if (isProjectManager && filters.perPage !== 'all' && filters.perPage !== 'الكل') {
-      setFilters(prev => ({ ...prev, perPage: 'all' }));
-    }
-  }, [isProjectManager]);
 
   // ✅ جلب أنواع المشاريع من API
   useEffect(() => {
@@ -3178,7 +3124,7 @@ const ProjectsList = () => {
 
         return row;
       });
-// this is the section three **************************
+      // this is the section three **************************
       // ✅ إزالة الأعمدة الفارغة تماماً
       const cleanedData = excelData.map(row => {
         const cleanRow = {};
@@ -4494,7 +4440,7 @@ const ProjectsList = () => {
       } catch (error) {
         console.error('Error refetching projects in background:', error);
       }
-    }, 2000);
+    }, 4000);
   };
 
   // ✅ دالة لفتح Modal تحديث حالة التنفيذ
@@ -4518,7 +4464,7 @@ const ProjectsList = () => {
       }
     }
   };
-// here the section four is start *********************************
+  // here the section four is start *********************************
   // ✅ دالة لتحديث حالة التنفيذ إلى "تم التنفيذ"
   const handleCompleteExecution = async () => {
     if (!selectedProjectForStatusUpdate) return;
@@ -6431,13 +6377,9 @@ const ProjectsList = () => {
 
     }
 
-    // ✅ فلترة المشاريع المتأخرة فقط (العداد يتوقف عند "وصل للمتبرع" أو "منتهي" - لا نعتبرها متأخرة)
+    // ✅ فلترة المشاريع المتأخرة فقط (الأحمر) — تعتمد على isLateForPM (remaining_days <= 0)
     if (filters.show_delayed_only) {
-      filteredProjects = filteredProjects.filter((project) => {
-        const status = (project?.status || '').trim();
-        if (status === 'منتهي' || status === 'وصل للمتبرع') return false; // العداد متوقف
-        return project.is_delayed === true || project.isDelayed === true;
-      });
+      filteredProjects = filteredProjects.filter((project) => isLateForPM(project));
     }
 
     // ✅ فلترة المشاريع العاجلة فقط
@@ -6504,41 +6446,9 @@ const ProjectsList = () => {
 
   // تطبيق pagination في Frontend عند الترتيب حسب التاريخ
   const paginatedProjects = useMemo(() => {
-    // ✅ لمنسق الكفالات: دائماً عرض جميع المشاريع بدون pagination
-    if (isOrphanSponsorCoordinator) {
-      return visibleProjects;
-    }
-
-    // ✅ إذا كان perPage = 'all'، نعرض جميع المشاريع بدون pagination
-    if (filters.perPage === 'all' || filters.perPage === 'الكل') {
-      return visibleProjects;
-    }
-
-    // ✅ تحويل perPage إلى رقم للتأكد من أنه رقم صحيح
-    const perPageNumber = typeof filters.perPage === 'number' ? filters.perPage : parseInt(filters.perPage) || 10;
-
-    // إذا كان الترتيب حسب التاريخ، نطبق pagination في Frontend
-    if (sortConfig?.key === 'created_at' || sortConfig?.key === 'updated_at') {
-      const startIndex = (filters.page - 1) * perPageNumber;
-      const endIndex = startIndex + perPageNumber;
-      const paginated = visibleProjects.slice(startIndex, endIndex);
-
-
-      return paginated;
-    }
-
-    // ✅ إذا لم يكن هناك ترتيب حسب التاريخ، نستخدم pagination من Backend
-    // لكن يجب التأكد من أن visibleProjects يحتوي على جميع المشاريع المرئية
-    // ✅ إذا كان perPage = 'all'، نعرض جميع المشاريع
-    if (filters.perPage === 'all' || filters.perPage === 'الكل') {
-      return visibleProjects;
-    }
-
-    // ✅ إذا كان هناك pagination من Backend، نستخدم البيانات كما هي
-    // لكن يجب التأكد من أن visibleProjects يحتوي على جميع المشاريع المرئية
-
+    // ✅ دائماً نستخدم البيانات كما هي من Backend لأننا نطبق pagination هناك
     return visibleProjects;
-  }, [visibleProjects, filters.page, filters.perPage, sortConfig, isProjectManager, pagination]);
+  }, [visibleProjects]);
 
 
   const parentProjectOptions = useMemo(() => {
@@ -6882,18 +6792,25 @@ const ProjectsList = () => {
       };
     }
 
-    // ✅ عندما remaining_days < 2 (أو سالب): نعرض "متأخر بـ X يوم" بدلاً من رقم سالب
-    // إذا الـ API أرسل delayed_days = 0 (مثلاً لحالة تم التنفيذ) نعتمد الحساب من remaining_days ليعكس التأخير الفعلي (مثلاً -4 → 6 أيام)
     const remaining = Number(project.remaining_days);
-    if (!Number.isNaN(remaining) && remaining < 2) {
+
+    const notDelayedStatuses = ['تم التنفيذ', 'منفذ', 'وصل للمتبرع', 'منتهي', 'ملغى'];
+    const isOverdue = !Number.isNaN(remaining) && remaining <= 0 && !notDelayedStatuses.includes(status);
+
+    // ✅ متأخر: remaining_days <= 0 (أحمر)
+    if (isOverdue) {
       const fromApi = project.delayed_days ?? project.delayedDays;
-      const computed = Math.max(0, 2 - remaining);
+      const computed = Math.max(0, 2 - remaining); // remaining<=0 => >=2
       const raw = (fromApi != null && fromApi > 0) ? fromApi : computed;
-      const delayedDays = Math.max(1, raw);
+      const delayedDays = Math.max(2, raw);
+
       return {
         element: (
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
-            ⚠️ متأخر بـ {delayedDays} يوم
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300">
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>متأخر</span>
+            <span className="font-extrabold">{delayedDays}</span>
+            <span>يوم</span>
           </span>
         ),
         isOverdue: true,
@@ -6901,11 +6818,29 @@ const ProjectsList = () => {
       };
     }
 
-    // ✅ في الوقت المحدد (remaining_days >= 2): عرض الأيام المتبقية
+    // ✅ متبقي: remaining_days >= 1 (أخضر) — وخاصاً 2/1 بتصميم "متبقي + يومين/يوم"
+    if (!Number.isNaN(remaining) && remaining >= 1) {
+      const dayText = remaining === 2 ? 'يومين' : 'يوم';
+
+      return {
+        element: (
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
+            <AlertCircle className="w-3.5 h-3.5 opacity-70" />
+            <span>متبقي</span>
+            <span className="font-extrabold">{remaining}</span>
+            <span>{dayText}</span>
+          </span>
+        ),
+        isOverdue: false,
+        isFinished: false,
+      };
+    }
+
+    // ✅ باقي الحالات: (remaining <= 0 ولكن ليست "متأخرة" بسبب status) → نخليها بدون badge
     return {
       element: (
-        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-          {project.remaining_days} يوم متبقي
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+          ✓ في الوقت
         </span>
       ),
       isOverdue: false,
@@ -7892,8 +7827,8 @@ const ProjectsList = () => {
                         // ✅ تمييز المشاريع العاجلة بخلفية حمراء واضحة وحدود مميزة
                         rowClassName += 'bg-gradient-to-r from-red-100 via-red-50 to-red-100 border-l-8 border-red-600 shadow-lg hover:shadow-xl hover:from-red-200 hover:via-red-100 hover:to-red-200 ring-2 ring-red-300';
                       } else if (isLateForPM(project)) {
-                        // ✅ تمييز المشاريع المتأخرة لمدير المشاريع (برتقالي)
-                        rowClassName += 'bg-orange-50 border-l-8 border-orange-500 hover:bg-orange-100 shadow-sm';
+                        // ✅ تمييز المشاريع المتأخرة لمدير المشاريع (أحمر)
+                        rowClassName += 'bg-red-50 border-l-8 border-red-500 hover:bg-red-100 shadow-sm';
                       } else if (isOrphanSponsorCoordinator && isMonthlyPhase) {
                         // ✅ (منسق الكفالة فقط): تمييز المشاريع الشهرية بلون مختلف عن المشاريع العادية
                         rowClassName += 'bg-gradient-to-r from-purple-50 via-indigo-50 to-purple-50 border-l-8 border-purple-400 hover:from-purple-100 hover:via-indigo-100 hover:to-purple-100';
@@ -7980,13 +7915,6 @@ const ProjectsList = () => {
                               </td>
                               <td className="py-2 px-3 text-sm font-medium" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>
                                 {remainingInfo.element}
-                                {isLateForPM(project) && (
-                                  <div className="mt-1">
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-600 text-white border border-orange-700 animate-pulse">
-                                      متأخر
-                                    </span>
-                                  </div>
-                                )}
                               </td>
                               <td className="py-2 px-3" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}>
                                 <div className="flex items-center justify-center gap-2">
@@ -8226,14 +8154,6 @@ const ProjectsList = () => {
                               </td>
                               <td className="py-4 px-6 text-sm font-medium">
                                 {remainingInfo.element}
-                                {isLateForPM(project) && (
-                                  <div className="mt-2">
-                                    <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-orange-600 text-white border-2 border-orange-700 shadow-lg animate-pulse" title="متأخر (بقي يومان أو أقل)">
-                                      <AlertCircle className="w-4 h-4" />
-                                      متأخر
-                                    </span>
-                                  </div>
-                                )}
                               </td>
                               <td className="py-4 px-6">
                                 <div className="flex items-center justify-center gap-2">
@@ -8833,10 +8753,11 @@ const ProjectsList = () => {
                           style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}
                         >
                           <option value={10}>10</option>
-                          <option value={30}>30</option>
+                          <option value={25}>25</option>
                           <option value={50}>50</option>
                           <option value={100}>100</option>
-                          <option value="all">الكل</option>
+                          <option value={250}>250</option>
+                          {!isFinishedProjectsPage && <option value="all">الكل (500)</option>}
                         </select>
                       </div>
                     </div>

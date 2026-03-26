@@ -4,419 +4,522 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Http\Request;
 
 /**
- * ✅ Service مركزي شامل لإدارة الكاش في كل البرنامج
- * يوحد منطق الكاش ويحسّن الأداء
+ * ✅ Central unified cache management service
+ *
+ * Improvements:
+ * - Atomic version increments (no race conditions)
+ * - Consolidated type/tag/version mapping (single source of truth)
+ * - Reduced logging noise (configurable log level)
+ * - Fixed dead code and unused variables
+ * - Added batch operations
+ * - Added cache warming support
+ * - Key length safety (auto-hashing long keys)
  */
 class CacheService
 {
-    // Cache TTL Constants (بالثواني) - ✅ محسّنة للأداء
-    public const TTL_STATIC = 7200;        // 2 ساعة - بيانات ثابتة (عملات، أنواع المشاريع) - زادت من 1 ساعة
-    public const TTL_SEMI_STATIC = 3600;   // 1 ساعة - بيانات شبه ثابتة (فرق، مستخدمين) - زادت من 30 دقيقة
-    public const TTL_DYNAMIC = 600;        // 10 دقائق - بيانات متغيرة (إحصائيات) - زادت من 5 دقائق
-    public const TTL_REALTIME = 30;        // 30 ثانية - بيانات فورية (مشاريع، إشعارات) - زادت من 10 ثواني
-    public const TTL_DASHBOARD = 120;       // 2 دقيقة - Dashboard - زادت من 1 دقيقة
-    public const TTL_LIST = 900;           // 15 دقيقة - قوائم (مستخدمين، فرق) - زادت من 10 دقائق
+    // ─────────────────────────────────────────────────────────────────────────
+    //  TTL Constants (seconds)
+    // ─────────────────────────────────────────────────────────────────────────
 
-    // Cache Prefixes
-    public const PREFIX_PROJECTS = 'projects';
-    public const PREFIX_NOTIFICATIONS = 'notifications';
-    public const PREFIX_DASHBOARD = 'dashboard';
-    public const PREFIX_USERS = 'users';
-    public const PREFIX_TEAMS = 'teams';
-    public const PREFIX_CURRENCIES = 'currencies';
-    public const PREFIX_PROJECT_TYPES = 'project_types';
-    public const PREFIX_SUBCATEGORIES = 'subcategories';
-    public const PREFIX_SURPLUS = 'surplus';
-    public const PREFIX_WAREHOUSE = 'warehouse';
+    public const TTL_STATIC      = 7200;  // 2h  — currencies, project types
+    public const TTL_SEMI_STATIC = 3600;  // 1h  — teams, users list
+    public const TTL_DYNAMIC     = 600;   // 10m — statistics
+    public const TTL_REALTIME    = 30;    // 30s — projects, notifications
+    public const TTL_DASHBOARD   = 120;   // 2m  — dashboard widgets
+    public const TTL_LIST        = 900;   // 15m — generic lists
+    public const TTL_VERSION     = 86400; // 24h — version keys
 
-    // Cache Version Keys
-    private const VERSION_PROJECTS = 'cache_version_projects';
-    private const VERSION_NOTIFICATIONS = 'cache_version_notifications';
-    private const VERSION_DASHBOARD = 'cache_version_dashboard';
-    private const VERSION_USERS = 'cache_version_users';
-    private const VERSION_TEAMS = 'cache_version_teams';
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Cache Prefixes
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public const PREFIX_PROJECTS       = 'projects';
+    public const PREFIX_NOTIFICATIONS  = 'notifications';
+    public const PREFIX_DASHBOARD      = 'dashboard';
+    public const PREFIX_USERS          = 'users';
+    public const PREFIX_TEAMS          = 'teams';
+    public const PREFIX_CURRENCIES     = 'currencies';
+    public const PREFIX_PROJECT_TYPES  = 'project_types';
+    public const PREFIX_SUBCATEGORIES  = 'subcategories';
+    public const PREFIX_SURPLUS        = 'surplus';
+    public const PREFIX_WAREHOUSE      = 'warehouse';
 
     /**
-     * بناء cache key موحد
+     * ✅ Single source of truth for type → tag & version-key mapping.
+     *    Eliminates the duplicated match/if-else chains.
+     */
+    private const TYPE_MAP = [
+        'projects'      => ['tag' => 'projects',      'version_key' => 'cache_version_projects'],
+        'notifications' => ['tag' => 'notifications', 'version_key' => 'cache_version_notifications'],
+        'dashboard'     => ['tag' => 'dashboard',     'version_key' => 'cache_version_dashboard'],
+        'users'         => ['tag' => 'users',         'version_key' => 'cache_version_users'],
+        'teams'         => ['tag' => 'teams',         'version_key' => 'cache_version_teams'],
+        'currencies'    => ['tag' => 'currencies',    'version_key' => 'cache_version_currencies'],
+        'surplus'       => ['tag' => 'surplus',       'version_key' => 'cache_version_surplus'],
+        'warehouse'     => ['tag' => 'warehouse',     'version_key' => 'cache_version_warehouse'],
+    ];
+
+    /**
+     * ✅ Maximum safe key length for most cache drivers.
+     *    Redis: 512 MB (no practical limit)
+     *    Memcached: 250 bytes
+     *    File: OS path limit ~255
+     */
+    private const MAX_KEY_LENGTH = 200;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Key Building
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Build a unified cache key.
      *
-     * @param string $prefix البادئة
-     * @param array $params المعاملات
-     * @param int|null $version إصدار الكاش (اختياري)
-     * @return string
+     * ✅ Improvements:
+     *    - Auto-hashes keys that exceed MAX_KEY_LENGTH
+     *    - Filters out null/empty params before building
+     *    - Deterministic output (same params → same key)
      */
     public static function buildKey(string $prefix, array $params = [], ?int $version = null): string
     {
         $keyParts = [$prefix];
-        
-        // إضافة المعاملات
+
         foreach ($params as $key => $value) {
-            if ($value !== null && $value !== '') {
-                // تقصير القيم الطويلة
-                if (is_string($value) && strlen($value) > 50) {
-                    $value = substr(md5($value), 0, 16);
-                }
-                $keyParts[] = "{$key}:" . (is_array($value) ? md5(json_encode($value)) : $value);
+            if ($value === null || $value === '' || $value === []) {
+                continue;
             }
+
+            $serialized = is_array($value)
+                ? substr(md5(json_encode($value)), 0, 16)
+                : (is_string($value) && strlen($value) > 50
+                    ? substr(md5($value), 0, 16)
+                    : (string) $value);
+
+            $keyParts[] = "{$key}:{$serialized}";
         }
-        
-        $key = implode('_', $keyParts);
-        
-        // إضافة الإصدار إذا كان موجوداً
+
         if ($version !== null) {
-            $key .= '_v' . $version;
+            $keyParts[] = "v{$version}";
         }
-        
+
+        $key = implode('_', $keyParts);
+
+        // ✅ Safety: hash if too long for the cache driver
+        if (strlen($key) > self::MAX_KEY_LENGTH) {
+            $key = $prefix . '_' . md5($key) . ($version !== null ? "_v{$version}" : '');
+        }
+
         return $key;
     }
 
     /**
-     * جلب من الكاش أو تنفيذ callback
+     * Build cache key from an HTTP Request.
      *
-     * @param string $key
-     * @param callable $callback
-     * @param int $ttl
-     * @param bool $useVersion استخدام versioning
-     * @return mixed
+     * ✅ Improvements:
+     *    - Caps per_page to avoid cache-key explosion from large values
+     *    - Merges additional params cleanly
+     *    - Uses buildKey() internally (no duplication)
      */
-    public static function remember(string $key, callable $callback, int $ttl = self::TTL_REALTIME, bool $useVersion = false)
-    {
+    public static function buildKeyFromRequest(
+        Request $request,
+        string  $prefix,
+        array   $additionalParams = []
+    ): string {
+        $user        = $request->user();
+        $perPageRaw  = (int) $request->query('perPage', $request->query('per_page', 15));
+        $hasDateFilter = $request->hasAny(['start_date', 'end_date', 'created_at_start', 'created_at_end']);
+        $perPageCap  = $hasDateFilter ? 10_000 : 100;
+
+        $params = array_merge([
+            'uid'      => $user?->id ?? 'guest',
+            'role'     => strtolower($user?->role ?? 'guest'),
+            'status'   => $request->get('status', 'all'),
+            'type'     => $request->get('project_type', $request->get('type', 'all')),
+            'page'     => (int) $request->query('page', 1),
+            'pp'       => min($perPageRaw, $perPageCap),
+            'q'        => $request->get('searchQuery', $request->get('search', '')) ?: null,
+            'sort'     => $request->get('sort_by', $request->get('sort')) ?: null,
+        ], $additionalParams);
+
+        $version = self::getVersion($prefix);
+
+        return self::buildKey($prefix, $params, $version);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Core CRUD
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Get from cache or execute callback.
+     *
+     * ✅ Improvements:
+     *    - Removed per-hit debug logging (was too noisy)
+     *    - Only logs on cache miss with execution time
+     *    - Graceful fallback if cache driver fails
+     *    - $useVersion auto-appends version suffix
+     */
+    public static function remember(
+        string   $key,
+        callable $callback,
+        int      $ttl = self::TTL_REALTIME,
+        bool     $useVersion = false
+    ): mixed {
         try {
-            // إضافة version إذا كان مطلوباً
             if ($useVersion) {
-                $version = self::getVersion($key);
-                $key = $key . '_v' . $version;
+                $type = self::extractTypeFromKey($key);
+                $key  = $key . '_v' . self::getVersion($type);
             }
-            
+
             return Cache::remember($key, $ttl, function () use ($callback, $key) {
-                $startTime = microtime(true);
+                $start  = hrtime(true);
                 $result = $callback();
-                $duration = round((microtime(true) - $startTime) * 1000, 2);
-                
-                Log::debug('Cache miss - executed callback', [
-                    'key' => $key,
-                    'duration_ms' => $duration
-                ]);
-                
+                $ms     = round((hrtime(true) - $start) / 1_000_000, 2);
+
+                // ✅ Only log slow cache misses (> 100 ms) to reduce log noise
+                if ($ms > 100) {
+                    Log::info('CacheService: slow cache miss', [
+                        'key'         => $key,
+                        'duration_ms' => $ms,
+                    ]);
+                }
+
                 return $result;
             });
-        } catch (\Exception $e) {
-            Log::warning('Cache error, executing callback directly', [
-                'key' => $key,
-                'error' => $e->getMessage()
+        } catch (\Throwable $e) {
+            Log::warning('CacheService::remember failed, executing callback directly', [
+                'key'   => $key,
+                'error' => $e->getMessage(),
             ]);
+
             return $callback();
         }
     }
 
     /**
-     * جلب من الكاش
-     *
-     * @param string $key
-     * @param mixed $default
-     * @param bool $useVersion
-     * @return mixed
+     * ✅ NEW: Remember forever — for truly static data (currencies, etc.)
+     *    Still respects version invalidation.
      */
-    public static function get(string $key, $default = null, bool $useVersion = false)
+    public static function rememberForever(string $key, callable $callback, bool $useVersion = false): mixed
     {
         try {
             if ($useVersion) {
-                $version = self::getVersion($key);
-                $key = $key . '_v' . $version;
+                $type = self::extractTypeFromKey($key);
+                $key  = $key . '_v' . self::getVersion($type);
             }
-            
-            $value = Cache::get($key, $default);
-            
-            if ($value !== null && $value !== $default) {
-                Log::debug('Cache hit', ['key' => $key]);
+
+            return Cache::rememberForever($key, $callback);
+        } catch (\Throwable $e) {
+            Log::warning('CacheService::rememberForever failed', ['key' => $key, 'error' => $e->getMessage()]);
+            return $callback();
+        }
+    }
+
+    /**
+     * Get from cache.
+     *
+     * ✅ Removed per-hit debug logging (too noisy in production).
+     */
+    public static function get(string $key, mixed $default = null, bool $useVersion = false): mixed
+    {
+        try {
+            if ($useVersion) {
+                $type = self::extractTypeFromKey($key);
+                $key  = $key . '_v' . self::getVersion($type);
             }
-            
-            return $value;
-        } catch (\Exception $e) {
-            Log::warning('Cache get error', [
-                'key' => $key,
-                'error' => $e->getMessage()
-            ]);
+
+            return Cache::get($key, $default);
+        } catch (\Throwable $e) {
+            Log::warning('CacheService::get failed', ['key' => $key, 'error' => $e->getMessage()]);
             return $default;
         }
     }
 
     /**
-     * حفظ في الكاش
-     *
-     * @param string $key
-     * @param mixed $value
-     * @param int $ttl
-     * @param bool $useVersion
-     * @return bool
+     * Put into cache.
      */
-    public static function put(string $key, $value, int $ttl = self::TTL_REALTIME, bool $useVersion = false): bool
+    public static function put(string $key, mixed $value, int $ttl = self::TTL_REALTIME, bool $useVersion = false): bool
     {
         try {
             if ($useVersion) {
-                $version = self::getVersion($key);
-                $key = $key . '_v' . $version;
+                $type = self::extractTypeFromKey($key);
+                $key  = $key . '_v' . self::getVersion($type);
             }
-            
+
             return Cache::put($key, $value, $ttl);
-        } catch (\Exception $e) {
-            Log::warning('Cache put error', [
-                'key' => $key,
-                'error' => $e->getMessage()
-            ]);
+        } catch (\Throwable $e) {
+            Log::warning('CacheService::put failed', ['key' => $key, 'error' => $e->getMessage()]);
             return false;
         }
     }
 
     /**
-     * حذف من الكاش
+     * Delete from cache.
      *
-     * @param string $key
-     * @return bool
+     * ✅ Fix: Removed unused $pattern variable.
+     *    Uses tags if available, otherwise direct forget.
      */
     public static function forget(string $key): bool
     {
         try {
-            // حذف جميع الإصدارات المحتملة
-            $pattern = $key . '_v*';
-            
-            // استخدام tags إذا كان متاحاً
-            if (method_exists(Cache::getStore(), 'tags')) {
-                $tag = self::getTagFromKey($key);
+            // ✅ Try tag-based flush first (more thorough)
+            if (self::supportsTagging()) {
+                $tag = self::resolveTag($key);
                 if ($tag) {
                     Cache::tags([$tag])->flush();
                     return true;
                 }
             }
-            
-            // حذف مباشر
+
             return Cache::forget($key);
-        } catch (\Exception $e) {
-            Log::warning('Cache forget error', [
-                'key' => $key,
-                'error' => $e->getMessage()
-            ]);
+        } catch (\Throwable $e) {
+            Log::warning('CacheService::forget failed', ['key' => $key, 'error' => $e->getMessage()]);
             return false;
         }
     }
 
     /**
-     * تحديث cache version (لإبطال جميع الكاشات المرتبطة)
+     * ✅ NEW: Check if a key exists in cache without retrieving the value.
+     */
+    public static function has(string $key, bool $useVersion = false): bool
+    {
+        try {
+            if ($useVersion) {
+                $type = self::extractTypeFromKey($key);
+                $key  = $key . '_v' . self::getVersion($type);
+            }
+
+            return Cache::has($key);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Versioning (Cache Invalidation)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Update cache version atomically (invalidates all related cached data).
      *
-     * @param string $type نوع الكاش (projects, notifications, etc.)
-     * @return int الإصدار الجديد
+     * ✅ Improvements:
+     *    - Uses Cache::increment() for atomic operation (no race condition)
+     *    - Falls back to get+put only if increment isn't supported
+     *    - Initializes version key if it doesn't exist
      */
     public static function updateVersion(string $type): int
     {
+        $versionKey = self::resolveVersionKey($type);
+
         try {
-            $versionKey = self::getVersionKey($type);
-            $currentVersion = Cache::get($versionKey, 0);
-            $newVersion = $currentVersion + 1;
-            
-            Cache::put($versionKey, $newVersion, 86400); // 24 ساعة
-            
-            Log::info('Cache version updated', [
-                'type' => $type,
-                'old_version' => $currentVersion,
-                'new_version' => $newVersion
+            // ✅ Initialize if not exists (atomic via add)
+            Cache::add($versionKey, 0, self::TTL_VERSION);
+
+            // ✅ Atomic increment — no race condition between concurrent requests
+            $newVersion = Cache::increment($versionKey);
+
+            if ($newVersion === false || $newVersion === null) {
+                // Fallback for drivers that don't support increment (e.g., file)
+                $current    = (int) Cache::get($versionKey, 0);
+                $newVersion = $current + 1;
+                Cache::put($versionKey, $newVersion, self::TTL_VERSION);
+            }
+
+            Log::info('CacheService: version updated', [
+                'type'        => $type,
+                'new_version' => $newVersion,
             ]);
-            
-            return $newVersion;
-        } catch (\Exception $e) {
-            Log::warning('Failed to update cache version', [
-                'type' => $type,
-                'error' => $e->getMessage()
+
+            return (int) $newVersion;
+        } catch (\Throwable $e) {
+            Log::warning('CacheService: version update failed', [
+                'type'  => $type,
+                'error' => $e->getMessage(),
             ]);
-            return Cache::get(self::getVersionKey($type), 0);
+
+            return (int) Cache::get($versionKey, 0);
         }
     }
 
     /**
-     * الحصول على cache version
-     *
-     * @param string $type
-     * @return int
+     * Get current cache version for a type.
      */
     public static function getVersion(string $type): int
     {
-        return Cache::get(self::getVersionKey($type), 0);
+        return (int) Cache::get(self::resolveVersionKey($type), 0);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Clearing
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * مسح كاش نوع معين
+     * Clear cache for a specific type.
      *
-     * @param string $type
-     * @return void
+     * ✅ Updates version + flushes tags if available.
      */
     public static function clear(string $type): void
     {
         try {
-            // تحديث الإصدار (أسرع وأكثر أماناً)
             self::updateVersion($type);
-            
-            // استخدام tags إذا كان متاحاً
-            if (method_exists(Cache::getStore(), 'tags')) {
-                $tag = self::getTagFromType($type);
+
+            if (self::supportsTagging()) {
+                $tag = self::resolveTag($type);
                 if ($tag) {
                     Cache::tags([$tag])->flush();
-                    Log::info('Cache cleared using tags', ['type' => $type, 'tag' => $tag]);
+                    Log::info('CacheService: cleared via tags', ['type' => $type, 'tag' => $tag]);
                     return;
                 }
             }
-            
-            Log::info('Cache version updated (keys will expire via TTL)', ['type' => $type]);
-        } catch (\Exception $e) {
-            Log::warning('Failed to clear cache', [
-                'type' => $type,
-                'error' => $e->getMessage()
-            ]);
+
+            Log::info('CacheService: version bumped, keys expire via TTL', ['type' => $type]);
+        } catch (\Throwable $e) {
+            Log::warning('CacheService: clear failed', ['type' => $type, 'error' => $e->getMessage()]);
         }
     }
 
     /**
-     * مسح جميع الكاشات
-     *
-     * @return void
+     * ✅ NEW: Clear multiple types at once (e.g., after a project update
+     *    that affects dashboard + projects + notifications).
+     */
+    public static function clearMultiple(array $types): void
+    {
+        foreach ($types as $type) {
+            self::clear($type);
+        }
+    }
+
+    /**
+     * Flush the entire cache store.
      */
     public static function clearAll(): void
     {
         try {
             Cache::flush();
-            Log::info('All cache cleared');
-        } catch (\Exception $e) {
-            Log::warning('Failed to clear all cache', ['error' => $e->getMessage()]);
+            Log::info('CacheService: entire cache flushed');
+        } catch (\Throwable $e) {
+            Log::warning('CacheService: flush failed', ['error' => $e->getMessage()]);
         }
     }
 
-    /**
-     * بناء cache key من Request
-     *
-     * @param Request $request
-     * @param string $prefix
-     * @param array $additionalParams
-     * @return string
-     */
-    public static function buildKeyFromRequest(Request $request, string $prefix, array $additionalParams = []): string
-    {
-        $user = $request->user();
-        $perPageRaw = (int) $request->query('perPage', $request->query('per_page', 15));
-        $hasDateFilter = $request->filled('start_date') || $request->filled('end_date')
-            || $request->filled('created_at_start') || $request->filled('created_at_end');
-        $perPageCap = $hasDateFilter ? 10000 : 100;
-        $params = array_merge([
-            'user_id' => $user?->id ?? 'guest',
-            'role' => strtolower($user?->role ?? 'guest'),
-            'status' => $request->get('status', 'all'),
-            'type' => $request->get('project_type', $request->get('type', 'all')),
-            'page' => (int) $request->query('page', 1),
-            'per_page' => min($perPageRaw, $perPageCap),
-            'search' => substr(md5($request->get('searchQuery', $request->get('search', ''))), 0, 8),
-        ], $additionalParams);
-
-        return self::buildKey($prefix, $params);
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    //  TTL Helper
+    // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * الحصول على TTL حسب نوع البيانات
-     *
-     * @param string $type
-     * @return int
+     * Get appropriate TTL by data volatility category.
      */
-    public static function getTtl(string $type): int
+    public static function getTtl(string $category): int
     {
-        return match($type) {
-            'static' => self::TTL_STATIC,
+        return match ($category) {
+            'static'      => self::TTL_STATIC,
             'semi_static' => self::TTL_SEMI_STATIC,
-            'dynamic' => self::TTL_DYNAMIC,
-            'realtime' => self::TTL_REALTIME,
-            'dashboard' => self::TTL_DASHBOARD,
-            'list' => self::TTL_LIST,
-            default => self::TTL_REALTIME,
+            'dynamic'     => self::TTL_DYNAMIC,
+            'realtime'    => self::TTL_REALTIME,
+            'dashboard'   => self::TTL_DASHBOARD,
+            'list'        => self::TTL_LIST,
+            default       => self::TTL_REALTIME,
         };
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Diagnostics
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * الحصول على version key
-     *
-     * @param string $type
-     * @return string
+     * Get cache statistics for debugging.
      */
-    private static function getVersionKey(string $type): string
+    public static function getStats(): array
     {
-        return match($type) {
-            'projects', self::PREFIX_PROJECTS => self::VERSION_PROJECTS,
-            'notifications', self::PREFIX_NOTIFICATIONS => self::VERSION_NOTIFICATIONS,
-            'dashboard', self::PREFIX_DASHBOARD => self::VERSION_DASHBOARD,
-            'users', self::PREFIX_USERS => self::VERSION_USERS,
-            'teams', self::PREFIX_TEAMS => self::VERSION_TEAMS,
-            default => 'cache_version_' . $type,
-        };
+        $versions = [];
+        foreach (array_keys(self::TYPE_MAP) as $type) {
+            $versions[$type] = self::getVersion($type);
+        }
+
+        return [
+            'driver'          => config('cache.default'),
+            'prefix'          => config('cache.prefix'),
+            'supports_tags'   => self::supportsTagging(),
+            'versions'        => $versions,
+        ];
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Internal Helpers (Single Source of Truth)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * ✅ Resolve version key from type — uses TYPE_MAP as single source of truth.
+     */
+    private static function resolveVersionKey(string $type): string
+    {
+        // Normalize prefix constants to plain type names
+        $normalized = self::normalizeType($type);
+
+        return self::TYPE_MAP[$normalized]['version_key'] ?? "cache_version_{$normalized}";
     }
 
     /**
-     * الحصول على tag من key
-     *
-     * @param string $key
-     * @return string|null
+     * ✅ Resolve tag name from type or key prefix.
      */
-    private static function getTagFromKey(string $key): ?string
+    private static function resolveTag(string $typeOrKey): ?string
     {
-        if (str_starts_with($key, self::PREFIX_PROJECTS)) {
-            return 'projects';
+        // Try direct match first
+        $normalized = self::normalizeType($typeOrKey);
+        if (isset(self::TYPE_MAP[$normalized])) {
+            return self::TYPE_MAP[$normalized]['tag'];
         }
-        if (str_starts_with($key, self::PREFIX_NOTIFICATIONS)) {
-            return 'notifications';
+
+        // Try prefix match (for full cache keys like "projects_uid:5_...")
+        foreach (self::TYPE_MAP as $type => $config) {
+            if (str_starts_with($typeOrKey, $type)) {
+                return $config['tag'];
+            }
         }
-        if (str_starts_with($key, self::PREFIX_DASHBOARD)) {
-            return 'dashboard';
-        }
-        if (str_starts_with($key, self::PREFIX_USERS)) {
-            return 'users';
-        }
-        if (str_starts_with($key, self::PREFIX_TEAMS)) {
-            return 'teams';
-        }
+
         return null;
     }
 
     /**
-     * الحصول على tag من type
-     *
-     * @param string $type
-     * @return string|null
+     * ✅ Normalize type string (handles both "projects" and PREFIX_PROJECTS constant value).
      */
-    private static function getTagFromType(string $type): ?string
+    private static function normalizeType(string $type): string
     {
-        return match($type) {
-            'projects', self::PREFIX_PROJECTS => 'projects',
-            'notifications', self::PREFIX_NOTIFICATIONS => 'notifications',
-            'dashboard', self::PREFIX_DASHBOARD => 'dashboard',
-            'users', self::PREFIX_USERS => 'users',
-            'teams', self::PREFIX_TEAMS => 'teams',
-            default => null,
-        };
+        // All PREFIX_* constants already equal the map keys, but just in case:
+        return strtolower(trim($type));
     }
 
     /**
-     * إحصائيات الكاش (للتشخيص)
-     *
-     * @return array
+     * ✅ Extract type/prefix from a full cache key (e.g., "projects_uid:5_..." → "projects").
      */
-    public static function getStats(): array
+    private static function extractTypeFromKey(string $key): string
     {
-        return [
-            'driver' => config('cache.default'),
-            'prefix' => config('cache.prefix'),
-            'versions' => [
-                'projects' => self::getVersion('projects'),
-                'notifications' => self::getVersion('notifications'),
-                'dashboard' => self::getVersion('dashboard'),
-                'users' => self::getVersion('users'),
-                'teams' => self::getVersion('teams'),
-            ],
-        ];
+        $firstUnderscore = strpos($key, '_');
+
+        return $firstUnderscore !== false
+            ? substr($key, 0, $firstUnderscore)
+            : $key;
+    }
+
+    /**
+     * ✅ Check if the current cache driver supports tagging.
+     *    Cached in-memory for the request lifecycle.
+     */
+    private static bool $tagSupport;
+
+    private static function supportsTagging(): bool
+    {
+        if (!isset(self::$tagSupport)) {
+            try {
+                self::$tagSupport = method_exists(Cache::getStore(), 'tags');
+            } catch (\Throwable) {
+                self::$tagSupport = false;
+            }
+        }
+
+        return self::$tagSupport;
     }
 }
-

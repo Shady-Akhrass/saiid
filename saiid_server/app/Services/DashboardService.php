@@ -8,24 +8,30 @@ use Illuminate\Support\Facades\Log;
 
 class DashboardService
 {
-    public function getAdminDashboard(): array
+    public function getAdminDashboard(array $filters = []): array
     {
         $baseQuery = ProjectProposal::forSurplusStatistics();
 
-        $totalProjects = $this->countTotalProjects();
+        // Apply filters if provided
+        if (!empty($filters['start_date'])) {
+            $baseQuery->where('created_at', '>=', $filters['start_date']);
+        }
+        if (!empty($filters['end_date'])) {
+            $baseQuery->where('created_at', '<=', $filters['end_date'] . ' 23:59:59');
+        }
+        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+            $baseQuery->whereIn('status', (array)$filters['status']);
+        }
+        if (!empty($filters['project_type']) && $filters['project_type'] !== 'all') {
+            $baseQuery->whereIn('project_type', (array)$filters['project_type']);
+        }
 
-        $totalValueUsd = (clone $baseQuery)
-            ->whereNotNull('donation_amount')
-            ->whereNotNull('exchange_rate')
-            ->where('donation_amount', '>', 0)
-            ->where('exchange_rate', '>', 0)
-            ->selectRaw('SUM(COALESCE(donation_amount, 0) * COALESCE(exchange_rate, 0)) as total')
-            ->value('total') ?? 0;
+        // Use the same base query for counting to ensure consistency
+        $totalProjects = (clone $baseQuery)->count();
 
-        $totalNetAmount = (clone $baseQuery)
-            ->whereNotNull('net_amount')
-            ->where('net_amount', '>', 0)
-            ->sum('net_amount');
+        // Use stored columns for accuracy and consistency with project-level calculations
+        $totalValueUsd = (clone $baseQuery)->sum('amount_in_usd');
+        $totalNetAmount = (clone $baseQuery)->sum('net_amount');
 
         $projectsByStatus = (clone $baseQuery)
             ->selectRaw('status, COUNT(*) as count')
@@ -61,6 +67,7 @@ class DashboardService
 
     // ─── Private ─────────────────────────────────────────
 
+    /*
     private function countTotalProjects(): int
     {
         return ProjectProposal::where(function ($q) {
@@ -76,6 +83,7 @@ class DashboardService
             });
         })->count();
     }
+    */
 
     private function getRecentProjects(): array
     {

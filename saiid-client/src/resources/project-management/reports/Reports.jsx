@@ -73,7 +73,8 @@ const MultiSelectDropdown = ({ label, options, selectedValues, onChange, placeho
     if (isAllSelected) {
       onChange([]);
     } else {
-      onChange(options.map(opt => opt.value || opt));
+      // ✅ Safety check: filter out null/undefined options and handle both string and object options
+      onChange(options.filter(Boolean).map(opt => typeof opt === 'string' ? opt : (opt?.value || opt)));
     }
   };
 
@@ -109,13 +110,13 @@ const MultiSelectDropdown = ({ label, options, selectedValues, onChange, placeho
             <span className={`text-sm font-bold ${isAllSelected ? 'text-sky-700' : 'text-gray-700'}`}>الكل</span>
           </div>
           <div className="space-y-0.5">
-            {options.map((option) => {
-              const value = typeof option === 'string' ? option : option.value;
-              const label = typeof option === 'string' ? option : option.label;
-              const isSelected = selectedValues.includes(value);
+            {(options || []).filter(Boolean).map((option, index) => {
+              const value = typeof option === 'string' ? option : (option?.value || '');
+              const label = typeof option === 'string' ? option : (option?.label || '');
+              const isSelected = Array.isArray(selectedValues) && selectedValues.includes(value);
               return (
                 <div 
-                  key={value}
+                  key={value || `opt-${index}`}
                   onClick={() => toggleOption(value)}
                   className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all group ${isSelected ? 'bg-sky-50' : 'hover:bg-gray-50'}`}
                 >
@@ -718,7 +719,13 @@ const Reports = () => {
 
         try {
           const dashboardResponse = await apiClient.get('/project-proposals-dashboard', {
-            params: { _t: Date.now() },
+            params: { 
+              start_date: filtersToUse.startDate,
+              end_date: filtersToUse.endDate,
+              status: filtersToUse.status,
+              project_type: filtersToUse.project_type,
+              _t: Date.now() 
+            },
             timeout: 5000,
             headers: { 'Cache-Control': 'no-cache' }
           });
@@ -1777,7 +1784,8 @@ const Reports = () => {
                 <MultiSelectDropdown
                   label="نوع المشروع"
                   placeholder="جميع الأنواع"
-                  options={allProjectTypes.length > 0 ? allProjectTypes.map(t => t.name_ar || t.name) : ["إغاثي", "تنموي", "طبي", "تعليمي"]}
+                  // ✅ Fix: allProjectTypes is already normalized to strings (or objects with name/value) in useEffect
+                  options={allProjectTypes && allProjectTypes.length > 0 ? allProjectTypes : ["إغاثي", "تنموي", "طبي", "تعليمي"]}
                   selectedValues={filters.project_type}
                   onChange={(val) => handleFilterChange('project_type', val)}
                 />

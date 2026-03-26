@@ -341,6 +341,12 @@ class SponsorshipGroupController extends Controller
                 $discountAmount = $item->cost * ($discountPct / 100);
                 $netAmount = $item->cost - $discountAmount;
 
+                // Determine the first image path for the legacy notes_image column
+                $firstNoteImagePath = null;
+                if (!empty($item->images) && count($item->images) > 0) {
+                    $firstNoteImagePath = 'project_notes_images/' . basename($item->images[0]);
+                }
+
                 $project = ProjectProposal::create([
                     'project_name' => $item->name,
                     'donor_code' => $item->donor_code,
@@ -356,25 +362,40 @@ class SponsorshipGroupController extends Controller
                     'beneficiaries_count' => $item->orphans_count,
                     'estimated_duration_days' => $estimatedDuration,
                     'notes' => $item->notes,
+                    'notes_image' => $firstNoteImagePath, // Set the primary note image
                     'status' => 'جديد',
                     'created_by' => auth()->id(),
                 ]);
 
-                // Copy images if exist
+                // Copy images correctly as "note" type to the PUBLIC directory
                 if (!empty($item->images)) {
-                    foreach ($item->images as $imagePath) {
-                        try {
-                            $newPath = 'project_images/' . basename($imagePath);
-                            Storage::disk('public')->copy($imagePath, $newPath);
+                    $targetDir = public_path('project_notes_images');
+                    if (!file_exists($targetDir)) {
+                        @mkdir($targetDir, 0755, true);
+                    }
 
-                            if (Schema::hasTable('project_proposal_images')) {
-                                DB::table('project_proposal_images')->insert([
-                                    'project_proposal_id' => $project->id,
-                                    'image_path' => $newPath,
-                                    'image_type' => 'notes',
-                                    'created_at' => now(),
-                                    'updated_at' => now(),
-                                ]);
+                    foreach ($item->images as $index => $sourcePath) {
+                        try {
+                            $filename = basename($sourcePath);
+                            $targetPath = 'project_notes_images/' . $filename;
+                            
+                            $fullSourcePath = Storage::disk('public')->path($sourcePath);
+                            $fullTargetPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
+                            
+                            // Use PHP copy to copy from storage to public root
+                            if (file_exists($fullSourcePath)) {
+                                if (@copy($fullSourcePath, $fullTargetPath)) {
+                                    if (Schema::hasTable('project_proposal_images')) {
+                                        DB::table('project_proposal_images')->insert([
+                                            'project_proposal_id' => $project->id,
+                                            'image_path' => $targetPath,
+                                            'type' => 'note',
+                                            'display_order' => $index,
+                                            'created_at' => now(),
+                                            'updated_at' => now(),
+                                        ]);
+                                    }
+                                }
                             }
                         } catch (\Exception $e) {
                             Log::warning("Failed to copy image for sponsorship item {$item->id}: " . $e->getMessage());

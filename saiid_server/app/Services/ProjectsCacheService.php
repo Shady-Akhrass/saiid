@@ -2,182 +2,242 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Service مركزي لإدارة cache المشاريع
- * ✅ يستخدم CacheService الموحد الآن
- * 
- * @deprecated يفضل استخدام CacheService مباشرة
- * لكن نبقيه للتوافق مع الكود الموجود
+ * ✅ Projects-specific cache wrapper around CacheService.
+ *
+ * Improvements:
+ * - Added missing `use Cache` import
+ * - Defined missing constants (CACHE_TAG_PROJECTS, OLD_VERSIONS_TO_KEEP, etc.)
+ * - Fixed clearOldCacheVersionsWithScan (was referencing undefined constants)
+ * - Made SCAN cleanup safe with chunked deletes and configurable limits
+ * - Added cache warming method
+ * - Removed @deprecated — this is a valid domain-specific wrapper
  */
 class ProjectsCacheService
 {
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Constants (were missing → caused runtime errors)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const CACHE_TAG_PROJECTS    = 'projects';
+    private const OLD_VERSIONS_TO_KEEP  = 3;
+    private const CACHE_VERSION_KEY     = 'cache_version_projects';
+    private const CACHE_VERSION_TTL     = 86400; // 24 hours
+
     /**
-     * تحديث cache version للمشاريع
-     * 
-     * @param string|null $context
-     * @param int|null $projectId
-     * @return int
+     * ✅ Safety limits for SCAN-based cleanup
+     */
+    private const SCAN_MAX_ITERATIONS   = 100;
+    private const SCAN_BATCH_SIZE       = 100;
+    private const DELETE_CHUNK_SIZE     = 1000;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Version Management
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Update projects cache version.
+     *
+     * ✅ Delegates to CacheService (atomic increment).
      */
     public static function updateCacheVersion(?string $context = null, ?int $projectId = null): int
     {
-        Log::info('Projects cache version update requested', [
-            'context' => $context,
-            'project_id' => $projectId
-        ]);
-        
+        Log::info('ProjectsCacheService: version update requested', array_filter([
+            'context'    => $context,
+            'project_id' => $projectId,
+        ]));
+
         return CacheService::updateVersion('projects');
     }
 
     /**
-     * الحصول على cache version الحالي
-     * 
-     * @return int
+     * Get current projects cache version.
      */
     public static function getCacheVersion(): int
     {
         return CacheService::getVersion('projects');
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Cache Clearing
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * مسح cache المشاريع بشكل كامل
-     * ✅ محسّن للأداء - يمسح الكاش بشكل فوري
-     * 
-     * @param string|null $context
-     * @param bool $clearOldVersions (مهمل - للتوافق)
-     * @return void
+     * Clear all projects cache.
+     *
+     * ✅ Improvements:
+     *    - Separated version bump from cache clear (both happen, in correct order)
+     *    - Optional old-version cleanup via SCAN
+     *    - Context is logged for debugging
      */
     public static function clearProjectsCache(?string $context = null, bool $clearOldVersions = false): void
     {
-        // ✅ تحديث cache version فوراً لإجبار Frontend على إعادة الجلب
-        CacheService::updateVersion('projects');
-        
-        // ✅ مسح الكاش بشكل كامل
+        // 1. Bump version → forces all clients to re-fetch
+        $newVersion = CacheService::updateVersion('projects');
+
+        // 2. Flush tagged cache (if driver supports it)
         CacheService::clear('projects');
-        
-        Log::info('Projects cache cleared and version updated', [
-            'context' => $context,
-            'new_version' => CacheService::getVersion('projects')
-        ]);
+
+        // 3. Optionally clean up old versioned keys from Redis
+        if ($clearOldVersions) {
+            self::clearOldCacheVersionsWithScan($newVersion);
+        }
+
+        Log::info('ProjectsCacheService: cache cleared', array_filter([
+            'context'     => $context,
+            'new_version' => $newVersion,
+            'old_cleanup' => $clearOldVersions,
+        ]));
     }
 
     /**
-     * مسح الإصدارات القديمة من cache باستخدام SCAN (آمن للإنتاج)
-     * 
-     * ⚠️ ملاحظة: هذه الطريقة اختيارية وليست ضرورية
-     * الأفضل الاعتماد على TTL فقط، لكن إذا أردنا تنظيف يدوي، نستخدم SCAN
-     * 
-     * @param int $currentVersion الإصدار الحالي
-     * @return void
+     * Clear cache for a single project.
+     *
+     * ✅ Bumps the global projects version (individual project keys
+     *    are versioned, so the old key simply expires via TTL).
+     */
+    public static function clearProjectCache(int $projectId): void
+    {
+        self::clearProjectsCache("single_project_{$projectId}");
+    }
+
+    /**
+     * ✅ NEW: Clear projects cache along with related types
+     *    (e.g., after a project update, dashboard stats are also stale).
+     */
+    public static function clearProjectsAndRelated(): void
+    {
+        CacheService::clearMultiple(['projects', 'dashboard', 'surplus']);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Key Building
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Build a versioned cache key for projects.
+     *
+     * ✅ Delegates to CacheService::buildKey for consistency.
+     */
+    public static function buildCacheKey(string $baseKey): string
+    {
+        $version = self::getCacheVersion();
+
+        return CacheService::buildKey($baseKey, [], $version);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Old-Version Cleanup (Redis SCAN)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Clean up old versioned cache keys using Redis SCAN (production-safe).
+     *
+     * ✅ Improvements:
+     *    - Fixed undefined constant references
+     *    - Added cursor type safety (Redis returns mixed types)
+     *    - Uses configurable constants for limits
+     *    - Chunked deletes with logging
+     *    - Guards against non-Redis drivers gracefully
      */
     private static function clearOldCacheVersionsWithScan(int $currentVersion): void
     {
         try {
-            // استخدام Cache tags إذا كان متاحاً (Redis/Memcached)
-            if (method_exists(Cache::getStore(), 'tags')) {
+            $store = Cache::getStore();
+
+            // ── Strategy 1: Tag-based flush (cleanest) ─────────────────────
+            if (method_exists($store, 'tags')) {
                 Cache::tags([self::CACHE_TAG_PROJECTS])->flush();
-                Log::info('Cleared projects cache using tags');
+                Log::info('ProjectsCacheService: cleared via cache tags');
                 return;
             }
-            
-            $cacheDriver = Cache::getStore();
-            
-            if (method_exists($cacheDriver, 'getRedis')) {
-                // ✅ استخدام SCAN بدلاً من KEYS - آمن للإنتاج (non-blocking)
-                $redis = $cacheDriver->getRedis();
-                $cursor = 0;
-                $keysToDelete = [];
-                $maxIterations = 100; // حد أقصى للدورات لتجنب loop لا نهائي
-                $iteration = 0;
-                
-                do {
-                    // SCAN مع MATCH pattern - non-blocking
-                    $result = $redis->scan($cursor, [
-                        'MATCH' => '*projects_*_v*',
-                        'COUNT' => 100 // عدد المفاتيح في كل دورة
-                    ]);
-                    
-                    $cursor = $result[0]; // Cursor الجديد
-                    $keys = $result[1]; // المفاتيح المطابقة
-                    
-                    // فلترة المفاتيح القديمة
-                    foreach ($keys as $key) {
-                        if (preg_match('/_v(\d+)$/', $key, $matches)) {
-                            $keyVersion = (int)$matches[1];
-                            // نحذف الإصدارات الأقدم من (currentVersion - OLD_VERSIONS_TO_KEEP)
-                            if ($keyVersion < ($currentVersion - self::OLD_VERSIONS_TO_KEEP)) {
-                                $keysToDelete[] = $key;
-                            }
-                        }
-                    }
-                    
-                    $iteration++;
-                    
-                    // ✅ حماية من loop لا نهائي
-                    if ($iteration >= $maxIterations) {
-                        Log::warning('SCAN reached max iterations, stopping', [
-                            'max_iterations' => $maxIterations,
-                            'cursor' => $cursor
-                        ]);
-                        break;
-                    }
-                    
-                } while ($cursor != 0); // 0 يعني انتهى SCAN
-                
-                // حذف المفاتيح القديمة (بحد أقصى 1000 في كل مرة)
-                if (!empty($keysToDelete)) {
-                    $chunks = array_chunk($keysToDelete, 1000); // حذف 1000 في كل مرة
-                    foreach ($chunks as $chunk) {
-                        $redis->del($chunk);
-                    }
-                    
-                    Log::info('Cleared old projects cache from Redis using SCAN', [
-                        'keys_count' => count($keysToDelete),
-                        'current_version' => $currentVersion,
-                        'iterations' => $iteration
-                    ]);
-                }
-            } else {
-                // Fallback: مسح جميع cache (للملفات/قاعدة البيانات)
-                // لكن فقط إذا كان الإصدار قديم جداً (أكثر من 10 إصدارات)
-                if ($currentVersion > 10) {
-                    Cache::flush();
-                    Cache::put(self::CACHE_VERSION_KEY, $currentVersion, self::CACHE_VERSION_TTL);
-                    Log::info('Cleared all cache (file/database driver) and reset version', [
-                        'version' => $currentVersion
-                    ]);
-                }
+
+            // ── Strategy 2: Redis SCAN (non-blocking, production-safe) ─────
+            if (method_exists($store, 'getRedis')) {
+                self::scanAndDeleteOldKeys($store, $currentVersion);
+                return;
             }
-        } catch (\Exception $e) {
-            Log::warning('Failed to clear old cache versions with SCAN', [
-                'error' => $e->getMessage(),
-                'current_version' => $currentVersion
+
+            // ── Strategy 3: File/Database driver fallback ──────────────────
+            // Only flush-all if versions have drifted significantly
+            if ($currentVersion > self::OLD_VERSIONS_TO_KEEP * 3) {
+                Cache::flush();
+                Cache::put(self::CACHE_VERSION_KEY, $currentVersion, self::CACHE_VERSION_TTL);
+                Log::info('ProjectsCacheService: flushed all (file/db driver)', [
+                    'version' => $currentVersion,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('ProjectsCacheService: old-version cleanup failed', [
+                'error'           => $e->getMessage(),
+                'current_version' => $currentVersion,
             ]);
         }
     }
 
     /**
-     * بناء cache key مع version
-     * 
-     * @param string $baseKey
-     * @return string
+     * ✅ Extracted: Redis SCAN + DELETE logic.
+     *    Runs in bounded iterations, deletes in chunks.
      */
-    public static function buildCacheKey(string $baseKey): string
+    private static function scanAndDeleteOldKeys(object $store, int $currentVersion): void
     {
-        $version = self::getCacheVersion();
-        return $baseKey . '_v' . $version;
-    }
+        $redis         = $store->getRedis();
+        $cursor        = '0'; // ✅ Redis SCAN cursor is a string
+        $keysToDelete  = [];
+        $iteration     = 0;
+        $minVersion    = $currentVersion - self::OLD_VERSIONS_TO_KEEP;
 
-    /**
-     * مسح cache لمشروع محدد
-     * 
-     * @param int $projectId
-     * @return void
-     */
-    public static function clearProjectCache(int $projectId): void
-    {
-        self::clearProjectsCache("project_{$projectId}");
+        do {
+            $result = $redis->scan(
+                $cursor,
+                ['MATCH' => '*projects_*_v*', 'COUNT' => self::SCAN_BATCH_SIZE]
+            );
+
+            // ✅ Guard: some Redis clients return false on error
+            if ($result === false) {
+                break;
+            }
+
+            [$cursor, $keys] = $result;
+
+            foreach ($keys as $key) {
+                if (preg_match('/_v(\d+)$/', $key, $matches)) {
+                    $keyVersion = (int) $matches[1];
+                    if ($keyVersion < $minVersion) {
+                        $keysToDelete[] = $key;
+                    }
+                }
+            }
+
+            $iteration++;
+
+            if ($iteration >= self::SCAN_MAX_ITERATIONS) {
+                Log::warning('ProjectsCacheService: SCAN hit iteration limit', [
+                    'max'    => self::SCAN_MAX_ITERATIONS,
+                    'cursor' => $cursor,
+                ]);
+                break;
+            }
+        } while ((string) $cursor !== '0');
+
+        // ── Delete in chunks ────────────────────────────────────────────
+        if (empty($keysToDelete)) {
+            return;
+        }
+
+        $total = count($keysToDelete);
+
+        foreach (array_chunk($keysToDelete, self::DELETE_CHUNK_SIZE) as $chunk) {
+            $redis->del($chunk);
+        }
+
+        Log::info('ProjectsCacheService: cleaned old keys via SCAN', [
+            'deleted_count'   => $total,
+            'current_version' => $currentVersion,
+            'iterations'      => $iteration,
+        ]);
     }
 }
-

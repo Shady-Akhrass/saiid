@@ -10,7 +10,7 @@ import { toast } from 'react-toastify';
 import UpdateStatusModal from './components/UpdateStatusModal';
 import BatchStatusUpdateForm from './components/BatchStatusUpdateForm';
 import { useUpdateExecutionStatus } from '../../hooks/useUpdateExecutionStatus';
-import { isLateForMedia } from '../project-management/projects/utils/ProjectUIHelpers';
+// ✅ remaining_days badge logic is implemented locally (same as PM list)
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj ?? {}, key);
 
@@ -52,7 +52,10 @@ const normalizeProjectRecord = (project = {}) => {
 
 const MediaProjectsList = () => {
   const { user } = useAuth();
-  const { id: producerId } = useParams(); // ✅ الحصول على id المنتج من الـ URL
+  const { id: rawProducerId } = useParams(); // ✅ الحصول على id المنتج من الـ URL
+  // ✅ harden: sometimes router provides "undefined"/"null" strings
+  const producerId =
+    rawProducerId && rawProducerId !== 'undefined' && rawProducerId !== 'null' && rawProducerId !== '' ? rawProducerId : null;
   const { getData, setCachedData, isCacheValid, initializeCache, clearCache } = useCache('media_projects', 60000); // ✅ تقليل مدة الـ cache إلى دقيقة واحدة لضمان ظهور البيانات الجديدة
   const { invalidateProjectsCache } = useCacheInvalidation();
   const abortControllerRef = useRef(null);
@@ -739,14 +742,9 @@ const MediaProjectsList = () => {
       // إيقاف حالة التحميل بعد timeout
       loadingTimeout = setTimeout(() => {
         setLoading(false);
-        setProjects([]);
-        setPagination({
-          current_page: 1,
-          last_page: 1,
-          per_page: 10000, // ✅ زيادة عدد المشاريع المعروضة لعرض جميع المشاريع
-          total: 0,
-        });
-      }, 5000); // timeout 5 ثواني
+        // ✅ لا نصفر البيانات هنا لتجنب "لا توجد مشاريع" إذا الطلب بيرجع بعد 5 ثواني
+        // سنعتمد على نجاح الطلب لاحقاً لإظهار البيانات.
+      }, 20000); // timeout 20 ثانية
 
       // ✅ استخدام endpoint مختلف إذا كان هناك producerId
       let endpoint = '/project-proposals';
@@ -761,11 +759,6 @@ const MediaProjectsList = () => {
       // ✅ إذا كان هناك producerId في الـ URL، استخدم الـ endpoint الجديد
       if (producerId) {
         endpoint = `/montage-producers/${producerId}/projects`;
-
-        // ✅ دعم filter_type للـ endpoint الجديد
-        if (appliedFilters.priority_only) {
-          params.append('filter_type', 'delayed');
-        }
 
         if (appliedFilters.execution_date_from) {
           params.append('from_date', appliedFilters.execution_date_from);
@@ -802,7 +795,8 @@ const MediaProjectsList = () => {
       let allProjectsDataRaw = [];
       let firstResponseData = null;
       let totalPages = 1;
-      const isAllMode = appliedFilters.perPage === 'all';
+      // ✅ عند تفعيل المتأخر فقط، نحتاج نسحب عدد أكبر لتفادي "فلترة على بيانات غير مكتملة"
+      const isAllMode = appliedFilters.perPage === 'all' || appliedFilters.priority_only;
 
       // جلب الصفحة الأولى
       const firstResponse = await apiClient.get(`${endpoint}?${params.toString()}`, {
@@ -820,6 +814,10 @@ const MediaProjectsList = () => {
           if (firstResponseData.pagination) {
             totalPages = firstResponseData.pagination.last_page || 1;
             perPageValue = firstResponseData.pagination.per_page || perPageValue;
+            } else if (firstResponseData.totalPages) {
+              // ✅ ProjectProposalController@index returns: totalPages/currentPage/perPage
+              totalPages = firstResponseData.totalPages || 1;
+              perPageValue = firstResponseData.perPage || perPageValue;
           }
           allProjectsDataRaw = firstResponseData.projects || [];
         } else if (firstResponseData.data && firstResponseData.data.data) {
@@ -831,7 +829,7 @@ const MediaProjectsList = () => {
         }
 
         // ✅ جلب باقي الصفحات إذا كان هناك أكثر من صفحة واحدة أو إذا كان perPage هو 'all'
-        if ((totalPages > 1 || isAllMode) && !producerId) { // فقط للـ endpoint العادي، ليس للمنتج المحدد
+        if ((totalPages > 1 || isAllMode)) {
           const maxPages = isAllMode ? 50 : 10; // إذا كان 'all'، نجلب حتى 50 صفحة
           for (let page = 2; page <= totalPages && page <= maxPages; page++) {
             try {
@@ -889,6 +887,14 @@ const MediaProjectsList = () => {
               per_page: perPageValue,
               total: responseData.pagination.total || allProjectsDataRaw.length,
             };
+          } else if (responseData.totalPages) {
+            // ✅ ProjectProposalController@index response shape
+            paginationData = {
+              current_page: responseData.currentPage || 1,
+              last_page: responseData.totalPages || totalPages,
+              per_page: responseData.perPage || perPageValue,
+              total: responseData.total || allProjectsDataRaw.length,
+            };
           }
 
           // ✅ إذا كان الـ endpoint الجديد يحتوي على معلومات المنتج، احفظها
@@ -908,6 +914,16 @@ const MediaProjectsList = () => {
         let projectsData = Array.isArray(projectsDataRaw)
           ? projectsDataRaw.map(normalizeProjectRecord)
           : [];
+
+          if (import.meta.env.DEV) {
+            console.log('📥 MediaProjectsList fetch:', {
+              endpoint,
+              producerId,
+              rawCount: Array.isArray(projectsDataRaw) ? projectsDataRaw.length : 0,
+              normalizedCount: projectsData.length,
+              priority_only: appliedFilters.priority_only,
+            });
+          }
 
         // ✅ Debug: التحقق من وجود subcategory_id في البيانات القادمة من Backend
         if (import.meta.env.DEV && projectsData.length > 0) {
@@ -1458,21 +1474,54 @@ const MediaProjectsList = () => {
 
         // ✅ فلترة حسب priority_only
         if (appliedFilters.priority_only) {
-          const now = new Date();
-          const DAY_IN_MS = 1000 * 60 * 60 * 24;
-          projectsData = projectsData.filter(p => {
-            if (p.status === 'في المونتاج' && p.montage_start_date) {
-              const startDate = new Date(p.montage_start_date);
-              const daysDiff = Math.floor((now - startDate) / DAY_IN_MS);
-              return daysDiff > 5;
+          projectsData = projectsData.filter((p) => {
+            const status = (p.status || '').trim();
+
+            const remaining = Number(p?.remaining_days ?? p?.remainingDays);
+            const notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'تم التنفيذ', 'منفذ', 'ملغى'];
+
+            // ✅ متأخر فعلياً حسب طلبك: remaining_days <= 0 (وليس < 2)
+            const derivedDelayed =
+              !Number.isNaN(remaining) &&
+              remaining <= 0 &&
+              !notDelayedStatuses.includes(status);
+
+            if (derivedDelayed) return true;
+
+            // ✅ fallback from dates when computed fields are missing
+            if (status === 'في المونتاج' && p?.montage_start_date) {
+              const startTs = new Date(p.montage_start_date).getTime();
+              if (!Number.isNaN(startTs)) {
+                const hoursDiff = (Date.now() - startTs) / (1000 * 60 * 60);
+                // Same concept: "overdue" if > 48 hours
+                return hoursDiff >= 48;
+              }
             }
-            if (p.status === 'تم التنفيذ' && p.execution_date) {
-              const execDate = new Date(p.execution_date);
-              const daysDiff = Math.floor((now - execDate) / DAY_IN_MS);
-              return daysDiff > 5;
+
+            // fallback: for other in-progress statuses, use execution_date
+            if (!notDelayedStatuses.includes(status) && p?.execution_date) {
+              const execTs = new Date(p.execution_date).getTime();
+              if (!Number.isNaN(execTs)) {
+                const hoursDiff = (Date.now() - execTs) / (1000 * 60 * 60);
+                return hoursDiff >= 48;
+              }
             }
+
             return false;
           });
+        }
+
+        // ✅ إذا كنا في صفحة "ممنتج محدد" وفعّلنا فلتر المتأخر،
+        // لأن الفلترة هنا تتم من الـ frontend، صحح pagination حتى لا يظهر عدد صفحات غير صحيح.
+        if (appliedFilters.priority_only) {
+          const totalFiltered = projectsData.length;
+          paginationData = {
+            ...paginationData,
+            current_page: 1,
+            last_page: 1,
+            total: totalFiltered,
+            per_page: Math.max(1, totalFiltered),
+          };
         }
 
         // ✅ فلترة المشاريع المنتهية: إزالة المشاريع المنتهية للمستخدمين غير Admin
@@ -1491,18 +1540,74 @@ const MediaProjectsList = () => {
         }
 
         // ✅ ترتيب المشاريع (إذا لم يكن في الباك إند)
-        // ✅ الأولوية للمتأخر للإعلام ثم إعادة المونتاج
+        // ✅ الأولوية: المشاريع المتأخرة للإعلام (في الأعلى) ثم إعادة المونتاج
         projectsData.sort((a, b) => {
-          const aLate = isLateForMedia(a);
-          const bLate = isLateForMedia(b);
-          if (aLate && !bLate) return -1;
-          if (!aLate && bLate) return 1;
+          const getRemaining = (p) => Number(p?.remaining_days ?? p?.remainingDays);
+          const getStatus = (p) => (p?.status || '').trim();
+          const notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'تم التنفيذ', 'منفذ', 'ملغى'];
+          const blockWarningStatuses = ['وصل للمتبرع', 'في المونتاج', 'منتهي', 'ملغى'];
+
+          const isLateOrWarningProject = (p) => {
+            const status = getStatus(p);
+            const remaining = getRemaining(p);
+
+            // ✅ late/warning: remaining_days <= 2 و ليست "في المونتاج"
+            const derivedWarning =
+              !Number.isNaN(remaining) &&
+              remaining <= 2 &&
+              !blockWarningStatuses.includes(status);
+
+            if (derivedWarning) return true;
+
+            // fallback from montage/execution dates
+            if (status === 'في المونتاج' && p?.montage_start_date) {
+              const startTs = new Date(p.montage_start_date).getTime();
+              if (!Number.isNaN(startTs)) {
+                const hoursDiff = (Date.now() - startTs) / (1000 * 60 * 60);
+                return hoursDiff >= 48;
+              }
+            }
+
+            if (!notDelayedStatuses.includes(status) && p?.execution_date) {
+              const execTs = new Date(p.execution_date).getTime();
+              if (!Number.isNaN(execTs)) {
+                const hoursDiff = (Date.now() - execTs) / (1000 * 60 * 60);
+                return hoursDiff >= 48;
+              }
+            }
+
+            return false;
+          };
+
+          const getDelayedDaysForSort = (p) => {
+            const fromApi = Number(p?.delayed_days ?? p?.delayedDays);
+            if (!Number.isNaN(fromApi) && fromApi > 0) return fromApi;
+
+            const remaining = getRemaining(p);
+            if (!Number.isNaN(remaining)) {
+              // when remaining < 2, delayed_days = 2 - remaining
+              return Math.max(1, Math.max(0, 2 - remaining));
+            }
+            return 1;
+          };
+
+          const aIsLate = isLateOrWarningProject(a);
+          const bIsLate = isLateOrWarningProject(b);
+          if (aIsLate && !bIsLate) return -1;
+          if (!aIsLate && bIsLate) return 1;
 
           const aIsRemontage = a.status === 'معاد مونتاجه';
           const bIsRemontage = b.status === 'معاد مونتاجه';
 
-          if (aIsRemontage && !bIsRemontage) return -1; // a يأتي أولاً
-          if (!aIsRemontage && bIsRemontage) return 1; // b يأتي أولاً
+          // if both are late states, keep higher delayed_days first (when available)
+          if (aIsLate && bIsLate) {
+            const aDays = getDelayedDaysForSort(a);
+            const bDays = getDelayedDaysForSort(b);
+            if (aDays !== bDays) return bDays - aDays;
+          }
+
+          if (aIsRemontage && !bIsRemontage) return -1;
+          if (!aIsRemontage && bIsRemontage) return 1;
 
           // إذا كانت نفس الفئة، نطبق الترتيب المطلوب
           if (appliedFilters.sort_by === 'priority') {
@@ -2150,6 +2255,114 @@ const MediaProjectsList = () => {
     return colors[status] || 'bg-gray-100 text-gray-700';
   };
 
+  // ✅ نفس منطق getRemainingDaysBadge الموجود في project-management/projects/ProjectsList.jsx
+  const getRemainingDaysBadge = (project) => {
+    const status = (project?.status || '').trim();
+    const notDelayedStatuses = ['تم التنفيذ', 'منفذ', 'وصل للمتبرع', 'منتهي', 'ملغى'];
+    const blockWarningStatuses = ['وصل للمتبرع', 'في المونتاج', 'منتهي', 'ملغى'];
+
+    if (status === 'منتهي') {
+      return {
+        element: (
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+            ✓ منتهي
+          </span>
+        ),
+        isOverdue: false,
+        isFinished: true,
+      };
+    }
+
+    if (status === 'وصل للمتبرع') {
+      return {
+        element: (
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+            ✓ وصل للمتبرع
+          </span>
+        ),
+        isOverdue: false,
+        isFinished: true,
+      };
+    }
+
+    const remainingRaw = project?.remaining_days ?? project?.remainingDays;
+    if (remainingRaw === null || remainingRaw === undefined) {
+      if (status === 'ملغى') {
+        return {
+          element: (
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700 border border-gray-300">
+              ملغى
+            </span>
+          ),
+          isOverdue: false,
+          isFinished: true,
+        };
+      }
+
+      return {
+        element: (
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            مكتمل
+          </span>
+        ),
+        isOverdue: false,
+        isFinished: true,
+      };
+    }
+
+    const remaining = Number(remainingRaw);
+    const isBlockedFromWarning = blockWarningStatuses.includes(status);
+
+    // ✅ متأخر (أحمر): remaining_days <= 0
+    if (!Number.isNaN(remaining) && remaining <= 0 && !notDelayedStatuses.includes(status)) {
+      const fromApi = project?.delayed_days ?? project?.delayedDays;
+      const computed = Math.max(0, 2 - remaining);
+      const raw = (fromApi != null && Number(fromApi) > 0) ? Number(fromApi) : computed;
+      const delayedDays = Math.max(1, raw);
+
+      return {
+        element: (
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300">
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>متأخر</span>
+            <span className="font-extrabold">{delayedDays}</span>
+            <span>يوم</span>
+          </span>
+        ),
+        isOverdue: true,
+        isFinished: false,
+      };
+    }
+
+    // ✅ تحذير (Late): remaining_days <= 2 و الحالة ليست "وصل للمتبرع" وليست "في المونتاج"
+    if (!Number.isNaN(remaining) && remaining <= 2 && !isBlockedFromWarning) {
+      const dayText = remaining === 2 ? 'يومين' : 'يوم';
+      return {
+        element: (
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>تحذير</span>
+            <span className="font-extrabold">{remaining}</span>
+            <span>{dayText}</span>
+          </span>
+        ),
+        isOverdue: true,
+        isFinished: false,
+      };
+    }
+
+    return {
+      element: (
+        <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
+          <span className="font-extrabold">{Number.isNaN(remaining) ? '—' : Math.abs(remaining)}</span>
+          <span>يوم متبقي</span>
+        </span>
+      ),
+      isOverdue: false,
+      isFinished: false,
+    };
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
@@ -2732,6 +2945,9 @@ const MediaProjectsList = () => {
                         String(project.is_urgent || '').toLowerCase() === 'true' ||
                         Boolean(project.is_urgent)) && project.status !== 'منتهي';
 
+                      const remainingInfoForRow = getRemainingDaysBadge(project);
+                      const isDelayedForMedia = remainingInfoForRow.isOverdue;
+
                       // ✅ Debug: في وضع التطوير، تسجيل الحالات المشبوهة
                       if (import.meta.env.DEV && isRemontage) {
                         console.log('🔍 Project with remontage status:', {
@@ -2749,9 +2965,9 @@ const MediaProjectsList = () => {
                       } else if (isUrgent) {
                         // ✅ تمييز المشاريع العاجلة بخلفية حمراء واضحة وحدود مميزة
                         rowClassName += 'bg-gradient-to-r from-red-100 via-red-50 to-red-100 border-l-8 border-red-600 shadow-lg hover:shadow-xl hover:from-red-200 hover:via-red-100 hover:to-red-200 ring-2 ring-red-300';
-                      } else if (isLateForMedia(project)) {
+                      } else if (isDelayedForMedia) {
                         // ✅ تمييز المشاريع المتأخرة للإعلام
-                        rowClassName += 'bg-orange-50 border-l-8 border-orange-500 hover:bg-orange-100 shadow-sm';
+                        rowClassName += 'bg-red-50 border-l-8 border-red-500 hover:bg-red-100 shadow-sm';
                       } else {
                         rowClassName += 'border-gray-100 hover:bg-gray-50';
                       }
@@ -2782,12 +2998,7 @@ const MediaProjectsList = () => {
                                     عاجل
                                   </span>
                                 ) }
-                                { isLateForMedia(project) && (
-                                  <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-orange-600 text-white border-2 border-orange-700 shadow-lg animate-pulse" title="متأخر (مر أكثر من 48 ساعة)">
-                                    <AlertCircle className="w-4 h-4" />
-                                    متأخر
-                                  </span>
-                                ) }
+                                { getRemainingDaysBadge(project).element }
                                 { project.status === 'تم التنفيذ' && (
                                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-200 animate-pulse">
                                     جديد
@@ -3309,4 +3520,3 @@ const MediaProjectsList = () => {
 };
 
 export default MediaProjectsList;
-

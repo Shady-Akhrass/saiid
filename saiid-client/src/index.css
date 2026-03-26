@@ -1,13 +1,61 @@
 /* index.css */
-/* ✅ تحسين تحميل الخطوط: استخدام font-display: swap */
-/* ✅ استخدام الخط المحلي من @fontsource/cairo بدلاً من Google Fonts */
-@import '@fontsource/cairo/300.css';
-@import '@fontsource/cairo/400.css';
-@import '@fontsource/cairo/500.css';
-@import '@fontsource/cairo/600.css';
-@import '@fontsource/cairo/700.css';
-@import '@fontsource/cairo/800.css';
-@import '@fontsource/cairo/900.css';
+/* ✅ استخدام خطوط Cairo المحلية من مجلد public/fonts */
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('/fonts/Cairo-Light.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/Cairo-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/Cairo-Medium.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/Cairo-SemiBold.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/Cairo-Bold.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/fonts/Cairo-ExtraBold.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url('/fonts/Cairo-Black.ttf') format('truetype');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

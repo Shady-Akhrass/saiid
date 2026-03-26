@@ -300,10 +300,14 @@ export const isLateForMedia = (project) => {
 export const isLateForPM = (project) => {
   if (!project) return false;
   const status = (project.status || '').trim();
-  if (status === 'وصل للمتبرع' || status === 'منتهي' || status === 'ملغى') return false;
+  // ✅ العداد متوقف أو الحالات لا تعتبر "متأخر" لمدير المشاريع
+  if (status === 'وصل للمتبرع' || status === 'منتهي' || status === 'ملغى' || status === 'تم التنفيذ' || status === 'منفذ') {
+    return false;
+  }
   
   const remaining = project.remaining_days ?? project.remainingDays;
   if (remaining === null || remaining === undefined || isNaN(Number(remaining))) return false;
   
-  return Number(remaining) <= 2;
+  // ✅ متأخر فقط عندما remaining_days <= 0
+  return Number(remaining) <= 0;
 };

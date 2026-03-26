@@ -2,130 +2,251 @@
 
 namespace App\Traits;
 
+use App\Services\CacheService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
+/**
+ * ✅ Trait for controllers that need cached JSON responses with ETag support.
+ *
+ * ⚠️ IMPORTANT: This trait does NOT define errorResponse() to avoid
+ *    collision with ApiResponse::errorResponse(). Instead it uses
+ *    buildCacheErrorResponse() internally, and delegates to
+ *    ApiResponse::errorResponse() when available.
+ */
 trait CacheableResponse
 {
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Cache Key Building
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * Build cache key from request parameters
+     * Build a deterministic cache key from request parameters.
      */
-    protected function buildCacheKey(string $prefix, Request $request, ?int $userId = null, ?string $userRole = null): string
-    {
+    protected function buildCacheKey(
+        string  $prefix,
+        Request $request,
+        ?int    $userId = null,
+        ?string $userRole = null
+    ): string {
+        $resolvedUserId   = $userId ?? $request->user()?->id ?? 0;
+        $resolvedUserRole = $userRole ?? strtolower($request->user()?->role ?? 'guest');
+
         $params = [
-            $prefix,
-            $userId ?? $request->user()?->id ?? 'guest',
-            $userRole ?? $request->user()?->role ?? 'guest',
-        ];
-
-        // Add key parameters (only important ones)
-        $keyParams = [
+            'uid'  => $resolvedUserId,
+            'role' => $resolvedUserRole,
             'status' => $request->get('status', 'all'),
-            'type' => $request->get('type', $request->get('project_type', 'all')),
-            'search' => substr(md5($request->get('searchQuery', '')), 0, 8),
-            'page' => (int) $request->query('page', 1),
-            'perPage' => min((int) $request->query('perPage', 15), 100),
-            'sort' => $request->get('sort_by', $request->get('sort', 'default')),
-            'filter' => substr(md5(json_encode($request->only(['unread_only', 'active_only', 'include_executed']))), 0, 8),
-            // ✅ مفاتيح إضافية لدعم فلاتر المخيمات وغيرها بدون كسر الكاش القديم
-            'gov' => $request->get('governorate', 'all'),
-            'dist' => $request->get('district', 'all'),
-            'mgr' => substr(md5($request->get('manager_name', '')), 0, 8),
-            'mgrPhone' => substr(md5($request->get('manager_phone', '')), 0, 8),
-            'famRange' => ($request->get('families_count_min', '') . '-' . $request->get('families_count_max', '')),
-            'tentsRange' => ($request->get('tents_count_min', '') . '-' . $request->get('tents_count_max', '')),
-            'excelFlag' => $request->get('has_excel', ''),
+            'type'   => $request->get('type', $request->get('project_type', 'all')),
+            'page'   => (int) $request->query('page', 1),
+            'pp'     => min((int) $request->query('perPage', $request->query('per_page', 15)), 500),
+            'sort'   => $request->get('sort_by', $request->get('sort', 'default')),
+            'q'      => $request->get('searchQuery', '') ?: null,
+            'flags'  => $request->only(['unread_only', 'active_only', 'include_executed']) ?: null,
+            'gov'    => $request->get('governorate') ?: null,
+            'dist'   => $request->get('district') ?: null,
+            'mgr'    => $request->get('manager_name') ?: null,
+            'mgrPh'  => $request->get('manager_phone') ?: null,
+            'famR'   => self::buildRangeParam($request, 'families_count_min', 'families_count_max'),
+            'tentR'  => self::buildRangeParam($request, 'tents_count_min', 'tents_count_max'),
+            'excel'  => $request->get('has_excel') ?: null,
         ];
 
-        $params = array_merge($params, array_values($keyParams));
-
-        return implode('_', $params);
+        return CacheService::buildKey($prefix, $params);
     }
 
     /**
-     * Get cached response or execute callback
+     * Build a range parameter string (returns null if both sides are empty).
      */
-    protected function getCachedResponse(string $cacheKey, callable $callback, int $ttl = 300): \Illuminate\Http\JsonResponse
+    private static function buildRangeParam(Request $request, string $minKey, string $maxKey): ?string
     {
+        $min = $request->get($minKey, '');
+        $max = $request->get($maxKey, '');
+
+        if ($min === '' && $max === '') {
+            return null;
+        }
+
+        return "{$min}-{$max}";
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Cached Response
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Get a cached JSON response, or execute the callback and cache the result.
+     */
+    protected function getCachedResponse(
+        string   $cacheKey,
+        callable $callback,
+        int      $ttl = 300
+    ): JsonResponse {
         try {
-            // Try to get from cache
+            // ── Try cache hit ───────────────────────────────────────────
             $cachedData = Cache::get($cacheKey);
-            
+
             if ($cachedData !== null) {
-                $etag = md5($cacheKey . '_' . ($cachedData['cache_time'] ?? time()));
-                $requestEtag = request()->header('If-None-Match');
-                
-                if ($requestEtag === $etag) {
-                    return response()->json([], 304)
-                        ->header('ETag', $etag)
-                        ->header('Access-Control-Allow-Origin', request()->header('Origin', '*'))
-                        ->header('Access-Control-Allow-Credentials', 'true');
-                }
-                
-                return response()->json($cachedData, 200)
-                    ->header('ETag', $etag)
-                    ->header('Cache-Control', 'private, max-age=' . $ttl)
-                    ->header('Last-Modified', gmdate('D, d M Y H:i:s', $cachedData['cache_time'] ?? time()) . ' GMT')
-                    ->header('Access-Control-Allow-Origin', request()->header('Origin', '*'))
-                    ->header('Access-Control-Allow-Credentials', 'true');
+                return $this->respondWithEtag($cachedData, $ttl);
             }
 
-            // Execute callback to get fresh data
+            // ── Cache miss: execute callback ────────────────────────────
             $responseData = $callback();
-            
-            // Add cache timestamp
+
             if (is_array($responseData)) {
                 $responseData['cache_time'] = time();
             }
 
-            // Store in cache
             Cache::put($cacheKey, $responseData, $ttl);
 
-            // Generate ETag
-            $etag = md5($cacheKey . '_' . $responseData['cache_time']);
+            return $this->respondWithEtag($responseData, $ttl);
 
-            return response()->json($responseData, 200)
-                ->header('ETag', $etag)
-                ->header('Cache-Control', 'private, max-age=' . $ttl)
-                ->header('Last-Modified', gmdate('D, d M Y H:i:s', $responseData['cache_time']) . ' GMT')
-                ->header('Access-Control-Allow-Origin', request()->header('Origin', '*'))
-                ->header('Access-Control-Allow-Credentials', 'true');
-                
-        } catch (\Exception $e) {
-            // ✅ معالجة الأخطاء مع ضمان إرسال CORS headers
-            \Log::error('Error in getCachedResponse', [
+        } catch (\Throwable $e) {
+            Log::error('CacheableResponse: error in getCachedResponse', [
                 'cache_key' => $cacheKey,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error'     => $e->getMessage(),
+                'file'      => $e->getFile() . ':' . $e->getLine(),
             ]);
-            
-            return response()->json([
-                'success' => false,
-                'error' => 'خطأ في الخادم',
-                'message' => $e->getMessage()
-            ], 500)
-                ->header('Access-Control-Allow-Origin', request()->header('Origin', '*'))
-                ->header('Access-Control-Allow-Credentials', 'true')
-                ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-                ->header('Access-Control-Allow-Headers', '*');
+
+            // ✅ FIX: Delegate to ApiResponse::errorResponse() if available,
+            //    otherwise use our own internal builder
+            return $this->buildCacheErrorResponse($e);
         }
     }
 
     /**
-     * Clear cache by prefix
+     * ✅ RENAMED from errorResponse() → buildCacheErrorResponse()
+     *    to avoid collision with ApiResponse::errorResponse()
+     *
+     *    This method tries to use ApiResponse::errorResponse() first,
+     *    and falls back to a standalone JSON response if not available.
+     */
+    private function buildCacheErrorResponse(\Throwable $e): JsonResponse
+    {
+        // ✅ Try delegating to ApiResponse::errorResponse() if the trait is used
+        if (method_exists($this, 'errorResponse')) {
+            $exception = $e instanceof \Exception ? $e : new \Exception($e->getMessage(), (int) $e->getCode(), $e);
+            return $this->errorResponse(
+                'خطأ في الخادم',
+                'حدث خطأ أثناء معالجة الطلب',
+                500,
+                $exception
+            );
+        }
+
+        // ✅ Fallback: standalone error response (no ApiResponse trait)
+        $payload = [
+            'success' => false,
+            'error'   => 'خطأ في الخادم',
+            'message' => 'حدث خطأ أثناء معالجة الطلب',
+        ];
+
+        if (config('app.debug')) {
+            $payload['debug'] = [
+                'message' => $e->getMessage(),
+                'file'    => $e->getFile() . ':' . $e->getLine(),
+            ];
+        }
+
+        return response()
+            ->json($payload, 500)
+            ->withHeaders($this->cacheCorsHeaders());
+    }
+
+    /**
+     * Build a JSON response with ETag and conditional 304 support.
+     */
+    private function respondWithEtag(mixed $data, int $ttl): JsonResponse
+    {
+        $etag = '"' . md5(serialize($data)) . '"';
+        $requestEtag = request()->header('If-None-Match');
+
+        if ($requestEtag === $etag) {
+            return response()
+                ->json(null, 304)
+                ->withHeaders($this->buildCacheResponseHeaders($etag, $ttl, $data));
+        }
+
+        return response()
+            ->json($data, 200)
+            ->withHeaders($this->buildCacheResponseHeaders($etag, $ttl, $data));
+    }
+
+    /**
+     * Centralized response headers builder.
+     */
+    private function buildCacheResponseHeaders(string $etag, int $ttl, mixed $data = null): array
+    {
+        $cacheTime = is_array($data) ? ($data['cache_time'] ?? time()) : time();
+
+        return array_merge(
+            [
+                'ETag'          => $etag,
+                'Cache-Control' => "private, max-age={$ttl}",
+                'Last-Modified' => gmdate('D, d M Y H:i:s', $cacheTime) . ' GMT',
+            ],
+            $this->cacheCorsHeaders()
+        );
+    }
+
+    /**
+     * ✅ RENAMED from corsHeaders() → cacheCorsHeaders()
+     *    to avoid potential collision with ApiResponse::addCorsHeaders()
+     *
+     *    If ApiResponse is also used, its addCorsHeaders() takes precedence
+     *    for normal responses. This is only used for cache-specific responses.
+     */
+    private function cacheCorsHeaders(): array
+    {
+        $origin = request()->header('Origin', '*');
+        $allowedOrigins = config('cors.allowed_origins', []);
+
+        $corsOrigin = '*';
+        if ($origin && $origin !== '*' && in_array($origin, $allowedOrigins)) {
+            $corsOrigin = $origin;
+        }
+
+        return [
+            'Access-Control-Allow-Origin'      => $corsOrigin,
+            'Access-Control-Allow-Credentials' => 'true',
+            'Access-Control-Allow-Methods'     => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers'     => 'Content-Type, Authorization, X-Requested-With, Accept',
+        ];
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Cache Clearing
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Clear cache by prefix/type.
      */
     protected function clearCacheByPrefix(string $prefix): void
     {
         try {
-            if (method_exists(Cache::getStore(), 'tags')) {
-                Cache::tags([$prefix])->flush();
-            } else {
-                // For file cache, we'll flush all (can be improved with Redis/Memcached)
-                Cache::flush();
-            }
-        } catch (\Exception $e) {
-            \Log::warning('Failed to clear cache', ['prefix' => $prefix, 'error' => $e->getMessage()]);
+            CacheService::clear($prefix);
+        } catch (\Throwable $e) {
+            Log::warning('CacheableResponse: clearCacheByPrefix failed', [
+                'prefix' => $prefix,
+                'error'  => $e->getMessage(),
+            ]);
         }
     }
-}
 
+    /**
+     * Check if caching should be skipped for this request.
+     */
+    protected function shouldSkipCache(Request $request): bool
+    {
+        if ($request->header('Cache-Control') === 'no-cache') {
+            return true;
+        }
+
+        if ($request->boolean('no_cache', false)) {
+            return true;
+        }
+
+        return false;
+    }
+}
