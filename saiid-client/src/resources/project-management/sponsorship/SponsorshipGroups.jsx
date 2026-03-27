@@ -12,6 +12,27 @@ import {
 const SponsorshipGroups = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  
+  // ✅ Role Check: Only Admin can access this page
+  const userRole = user?.role?.toLowerCase?.() ||
+    user?.userRole?.toLowerCase?.() ||
+    user?.user_role?.toLowerCase?.() ||
+    user?.role_name?.toLowerCase?.() ||
+    user?.role || '';
+
+  const isAdmin = userRole === 'admin' ||
+    userRole === 'administrator' ||
+    userRole === 'مدير' ||
+    userRole === 'مدير عام';
+
+  useEffect(() => {
+    // If user is loaded and not an admin, redirect
+    if (user && !isAdmin) {
+      toast.error('ليس لديك صلاحية للوصول لهذه الصفحة');
+      navigate('/dashboard');
+    }
+  }, [user, isAdmin, navigate]);
+
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
