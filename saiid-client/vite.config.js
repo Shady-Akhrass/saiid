@@ -189,10 +189,10 @@ export default defineConfig({
       ],
     },
     // ✅ Proxy للطلبات في وضع التطوير - يحل مشكلة CORS
-    // ملاحظة: هذا يتطلب تحديث VITE_API_URL في .env لاستخدام proxy
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        // ✅ التعديل: target يشير للسيرفر الحقيقي بدلاً من localhost
+        target: 'https://forms-api.saiid.org',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,
@@ -218,12 +218,13 @@ export default defineConfig({
           });
         },
       },
-      // ✅ Proxy للصور (project_notes_images, orphan_photos, etc.)
+      // ✅ Proxy للصور (project_notes_images)
       '/project_notes_images': {
-        target: 'http://localhost:8000',
+        // ✅ التعديل: target يشير للسيرفر الحقيقي
+        target: 'https://forms-api.saiid.org',
         changeOrigin: true,
         secure: true,
-        rewrite: (path) => path, // لا نعيد كتابة المسار
+        rewrite: (path) => path,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
             console.log('⚠️ Proxy error for project_notes_images:', err.message);
@@ -232,7 +233,6 @@ export default defineConfig({
             console.log('📸 Proxying image request:', req.method, req.url, '→', proxyReq.path);
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {
-            // ✅ إضافة CORS headers للصور
             if (!proxyRes.headers['access-control-allow-origin']) {
               proxyRes.headers['access-control-allow-origin'] = '*';
             }
@@ -242,7 +242,6 @@ export default defineConfig({
             if (!proxyRes.headers['access-control-allow-headers']) {
               proxyRes.headers['access-control-allow-headers'] = 'Content-Type, Authorization, Accept';
             }
-            // ✅ إضافة headers للصور
             if (!proxyRes.headers['content-type']) {
               proxyRes.headers['content-type'] = 'image/jpeg';
             }
@@ -279,9 +278,10 @@ export default defineConfig({
           });
         },
       },
-      // ✅ Proxy للمسارات الأخرى (storage, public/storage)
+      // ✅ Proxy للمسارات الأخرى (storage)
       '/storage': {
-        target: 'http://localhost:8000',
+        // ✅ التعديل: target يشير للسيرفر الحقيقي
+        target: 'https://forms-api.saiid.org',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,
@@ -300,7 +300,8 @@ export default defineConfig({
         },
       },
       '/public': {
-        target: 'http://localhost:8000',
+        // ✅ التعديل: target يشير للسيرفر الحقيقي
+        target: 'https://forms-api.saiid.org',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,

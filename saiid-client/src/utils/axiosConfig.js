@@ -145,22 +145,17 @@ const cleanHeaders = (headers) => {
 // ✅ تنظيف الـ cache كل دقيقة
 setInterval(cleanExpiredCache, 60000);
 
-// Create axios instance with default config
-// في التطوير: استخدم الـ proxy (/api). في الإنتاج: إن وُجد proxy على نفس الدومين استخدم /api لتجنب CORS
+// ✅ تحديد API URL بناءً على إعدادات .env فقط (بدون إجبار proxy في dev)
 const getApiUrl = () => {
   const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
-  const useProxyInProd = import.meta.env.VITE_API_USE_PROXY === 'true' || import.meta.env.VITE_API_USE_PROXY === '1';
-  const isDev = import.meta.env.DEV || import.meta.env.MODE === 'development';
+  const useProxy = import.meta.env.VITE_API_USE_PROXY === 'true' || import.meta.env.VITE_API_USE_PROXY === '1';
 
-  if (isDev) {
-    // Use proxy in development since Vite proxy is configured
+  // إذا كان VITE_API_USE_PROXY=true استخدم proxy محلي
+  if (useProxy) {
     return '/api';
   }
 
-  // إنتاج: إن ضُبط VITE_API_USE_PROXY=true فاستخدم /api (يجب أن يوجّه السيرفر /api إلى الـ Backend لتجنب CORS)
-  if (useProxyInProd) {
-    return '/api';
-  }
+  // استخدم VITE_API_URL مباشرة (سواء في dev أو production)
   return envUrl || 'https://forms-api.saiid.org/api';
 };
 
@@ -981,4 +976,3 @@ export const getImageBaseUrl = () => {
 };
 
 export default apiClient;
-
