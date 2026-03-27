@@ -308,14 +308,25 @@ class SponsorshipGroupController extends Controller
             'exchange_rate' => 'nullable|numeric|min:0',
             'estimated_duration_days' => 'nullable|integer|min:1',
             'project_type_id' => 'nullable|integer|exists:project_types,id',
+            'subcategory_id' => 'nullable|integer|exists:project_subcategories,id',
+            'sponsorship_item_ids' => 'nullable|array',
+            'sponsorship_item_ids.*' => 'integer|exists:sponsorship_items,id',
         ]);
 
         $group = SponsorshipGroup::with(['items.currency'])->findOrFail($id);
 
-        if (count($group->items) === 0) {
+        $itemsToProcess = collect($group->items);
+        if ($request->filled('sponsorship_item_ids') && count($request->sponsorship_item_ids) > 0) {
+            $requestedIds = array_map('intval', $request->sponsorship_item_ids);
+            $itemsToProcess = $itemsToProcess->filter(function($item) use ($requestedIds) {
+                return in_array($item->id, $requestedIds);
+            });
+        }
+
+        if ($itemsToProcess->isEmpty()) {
             return response()->json([
                 'success' => false,
-                'message' => 'لا توجد كفالات في هذه المجموعة',
+                'message' => 'لا توجد كفالات مطابقة لإنشاء المشروع',
             ], 422);
         }
 
@@ -336,7 +347,7 @@ class SponsorshipGroupController extends Controller
 
         DB::beginTransaction();
         try {
-            foreach ($group->items as $item) {
+            foreach ($itemsToProcess as $item) {
                 $discountPct = $item->discount_percentage ?? 0;
                 $discountAmount = $item->cost * ($discountPct / 100);
                 $netAmount = $item->cost - $discountAmount;
@@ -347,11 +358,34 @@ class SponsorshipGroupController extends Controller
                     $firstNoteImagePath = 'project_notes_images/' . basename($item->images[0]);
                 }
 
+                // ✅ Auto-generate Code: S-[First 2 letters]-[Sequence]
+                $namePrefix = mb_substr(trim($item->name), 0, 2, 'UTF-8');
+                // Replace spaces if the first two chars have them, optional.
+                $namePrefix = str_replace(' ', '', $namePrefix);
+                // Ensure we have at least 2 chars if possible, otherwise pad it
+                $namePrefix = mb_str_pad($namePrefix, 2, 'X', STR_PAD_RIGHT, 'UTF-8');
+                
+                $codePrefix = 'S-' . $namePrefix;
+                
+                // Find existing projects for this item to determine sequence
+                $lastProject = ProjectProposal::where('project_name', $item->name)
+                    ->where('donor_code', 'LIKE', $codePrefix . '-%')
+                    ->orderBy('id', 'desc')
+                    ->first();
+                
+                $sequence = 1;
+                if ($lastProject && preg_match('/-(\d+)$/', $lastProject->donor_code, $matches)) {
+                    $sequence = intval($matches[1]) + 1;
+                }
+                
+                $generatedCode = $codePrefix . '-' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
+
                 $project = ProjectProposal::create([
                     'project_name' => $item->name,
-                    'donor_code' => $item->donor_code,
+                    'donor_code' => $generatedCode,
                     'donor_name' => $group->name,
                     'project_type_id' => $projectTypeId,
+                    'subcategory_id' => $request->subcategory_id,
                     'donation_amount' => $item->cost,
                     'currency_id' => $item->currency_id,
                     'exchange_rate' => $exchangeRate,

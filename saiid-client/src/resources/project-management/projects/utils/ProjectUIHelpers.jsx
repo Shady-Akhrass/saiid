@@ -4,7 +4,7 @@ import {
   AlertCircle, Clock, CheckCircle2 
 } from 'lucide-react';
 
-// ✅ دالة لتنسيق المبلغ بالدولار
+
 export const formatCurrency = (amount) => {
   const numericAmount = Number(amount);
   if (isNaN(numericAmount) || numericAmount === 0) return '---';
@@ -296,18 +296,14 @@ export const isLateForMedia = (project) => {
   }
 };
 
-// ✅ دالة للتحقق من تأخر المشروع لمدير المشاريع (بقاء 2 يوم أو أقل)
 export const isLateForPM = (project) => {
   if (!project) return false;
   const status = (project.status || '').trim();
-  // ✅ العداد متوقف أو الحالات لا تعتبر "متأخر" لمدير المشاريع
-  if (status === 'وصل للمتبرع' || status === 'منتهي' || status === 'ملغى' || status === 'تم التنفيذ' || status === 'منفذ') {
-    return false;
-  }
-  
+  if (status === 'وصل للمتبرع' || status === 'منتهي' || status === 'ملغى') return false;
+
   const remaining = project.remaining_days ?? project.remainingDays;
   if (remaining === null || remaining === undefined || isNaN(Number(remaining))) return false;
-  
-  // ✅ متأخر فقط عندما remaining_days <= 0
-  return Number(remaining) <= 0;
+
+  // Consider delayed only when remaining days is exactly 0
+  return Number(remaining) === 0;
 };

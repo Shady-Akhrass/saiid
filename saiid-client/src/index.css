@@ -67,6 +67,7 @@
 
   body {
     @apply font-cairo antialiased;
+    font-weight: 500;
   }
 }
 
