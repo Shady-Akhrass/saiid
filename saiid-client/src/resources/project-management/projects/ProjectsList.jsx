@@ -496,7 +496,7 @@ const ProjectsList = () => {
     project_type: [], // ✅ تغيير إلى مصفوفة لدعم الاختيار المتعدد
     searchQuery: '',
     page: 1,
-    perPage: isFinishedProjectsPage ? 50 : 'all', // ✅ افتراضي 50 للمنتهية، 25 للبقية
+    perPage: isFinishedProjectsPage ? 50 : 5000, // ✅ افتراضي 50 للمنتهية (paginated)، 5000 للبقية (جلب الكل)
     phase_day: '', // فلترة حسب اليوم (للمشاريع اليومية)
     parent_project_id: '', // فلترة حسب المشروع الأصلي
     subcategory_id: [], // ✅ تغيير إلى مصفوفة لدعم الاختيار المتعدد
@@ -509,6 +509,26 @@ const ProjectsList = () => {
     show_urgent_only: false, // ✅ فلترة المشاريع العاجلة فقط
     show_sub_projects_only: false, // ✅ فلترة المشاريع الفرعية فقط (لمدير المشاريع)
   });
+
+  // ✅ إضافة مستمع لتغير مسار الصفحة بين (المشاريع المنتهية / جميع المشاريع) لإعادة تعيين الفلاتر ومسح الكاش فوراً
+  useEffect(() => {
+    // تصفير الكاش حتى يتم جلب البيانات الصحيحة للمسار الجديد
+    cacheRef.current = {
+      data: null,
+      timestamp: null,
+      filters: null,
+      maxAge: getCacheMaxAge ? getCacheMaxAge() : 120000,
+    };
+    try {
+      localStorage.removeItem('projects_cache');
+    } catch (e) { }
+
+    setFilters(prev => ({
+      ...prev,
+      page: 1,
+      perPage: isFinishedProjectsPage ? 50 : 5000,
+    }));
+  }, [isFinishedProjectsPage]);
 
   // ✅ State منفصل لقيمة البحث المكتوبة (بدون تطبيق البحث مباشرة)
   const [searchInput, setSearchInput] = useState('');
@@ -1443,10 +1463,11 @@ const ProjectsList = () => {
       // ✅ للإدارة: المشاريع غير المقسمة + المشاريع الأصلية المقسمة فقط
       // ❌ لا نطلب المشاريع الفرعية (اليومية والشهرية)
       if (isAdmin) {
-        // ✅ للإدارة: نستخدم pagination العادي
-        if (!params.per_page) {
-          params.per_page = isFinishedProjectsPage ? 50 : 25;
-          params.perPage = params.per_page;
+        // ✅ للمشاريع المنتهية: pagination عادي (50 لكل صفحة)
+        // ✅ للمشاريع غير المنتهية: لا نرسل per_page — Backend يجلب الكل افتراضياً
+        if (isFinishedProjectsPage && !params.per_page) {
+          params.per_page = 50;
+          params.perPage = 50;
         }
 
         // ✅ إضافة معاملات لجلب جميع المشاريع (غير المقسمة والمقسمة الأصلية)
@@ -1488,8 +1509,14 @@ const ProjectsList = () => {
       // ✅ إضافة cache busting قوي - استخدام timestamp فريد لكل طلب
       const cacheBustTimestamp = Date.now();
 
-      // ✅ لمنسق المشاريع المنفذة: استخدام /projects بدلاً من /project-proposals
-      const apiEndpoint = isExecutedCoordinator ? '/projects' : '/project-proposals';
+      // ✅ لمنسق المشاريع المنفذة: استخدام /projects
+      // ✅ للمشاريع المنتهية: استخدام /project-proposals/finished (paginated)
+      // ✅ للمشاريع غير المنتهية: استخدام /project-proposals (يجلب الكل افتراضياً)
+      const apiEndpoint = isExecutedCoordinator
+        ? '/projects'
+        : isFinishedProjectsPage
+          ? '/project-proposals/finished'
+          : '/project-proposals';
 
       const response = await apiClient.get(apiEndpoint, {
         params: {
@@ -1585,20 +1612,9 @@ const ProjectsList = () => {
             ? projectsData.map((item) => normalizeProjectRecord(item))
             : [];
 
-          // ✅ فلترة المشاريع المنتهية للأدمن
-          if (isAdmin) {
-            if (isFinishedProjectsPage) {
-              // ✅ في صفحة المشاريع المنتهية: عرض المشاريع المنتهية فقط
-              normalizedProjects = normalizedProjects.filter((project) => {
-                return project.status === 'منتهي';
-              });
-            } else {
-              // ✅ في القائمة الرئيسية: استبعاد المشاريع المنتهية
-              normalizedProjects = normalizedProjects.filter((project) => {
-                return project.status !== 'منتهي';
-              });
-            }
-          }
+          // ✅ الفلترة تتم في الـ Backend عبر endpoints منفصلة
+          // /project-proposals → غير المنتهية فقط
+          // /project-proposals/finished → المنتهية فقط
 
           // ✅ فلترة مشاريع الكفالة لمنسق الكفالة
           if (isOrphanSponsorCoordinator) {
@@ -6784,7 +6800,6 @@ const ProjectsList = () => {
   const getRemainingDaysBadge = (project) => {
     const status = (project?.status || '').trim();
 
-    // ✅ العداد يتوقف عند "منتهي"
     if (status === 'منتهي') {
       return {
         element: (
@@ -6797,7 +6812,6 @@ const ProjectsList = () => {
       };
     }
 
-    // ✅ العداد يتوقف عند "وصل للمتبرع"
     if (status === 'وصل للمتبرع') {
       return {
         element: (
@@ -6810,8 +6824,8 @@ const ProjectsList = () => {
       };
     }
 
-    // ✅ عندما remaining_days === null (العداد متوقف من الـ API) → عرض "مكتمل" أو حسب الحالة
-    if (project.remaining_days === null || project.remaining_days === undefined) {
+    const remainingRaw = project?.remaining_days ?? project?.remainingDays;
+    if (remainingRaw === null || remainingRaw === undefined) {
       if (status === 'ملغى') {
         return {
           element: (
@@ -6834,21 +6848,19 @@ const ProjectsList = () => {
       };
     }
 
-    const remaining = Number(project.remaining_days);
+    const remaining = Number(remainingRaw);
+    const notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'ملغى'];
+    const isOverdue = !Number.isNaN(remaining) && remaining <= 2 && !notDelayedStatuses.includes(status);
 
-    const notDelayedStatuses = ['تم التنفيذ', 'منفذ', 'وصل للمتبرع', 'منتهي', 'ملغى'];
-    const isOverdue = !Number.isNaN(remaining) && remaining <= 0 && !notDelayedStatuses.includes(status);
-
-    // ✅ متأخر: remaining_days <= 0 (أحمر)
-    if (isOverdue) {
-      const fromApi = project.delayed_days ?? project.delayedDays;
-      const computed = Math.max(0, 2 - remaining); // remaining<=0 => >=2
-      const raw = (fromApi != null && fromApi > 0) ? fromApi : computed;
-      const delayedDays = Math.max(2, raw);
+    if (!Number.isNaN(remaining) && remaining <= 0 && !notDelayedStatuses.includes(status)) {
+      const fromApi = project?.delayed_days ?? project?.delayedDays;
+      const computed = Math.abs(remaining);
+      const raw = (fromApi != null && Number(fromApi) > 0) ? Number(fromApi) : computed;
+      let delayedDays = Math.max(1, raw);
 
       return {
         element: (
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300">
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300 shadow-sm">
             <AlertCircle className="w-3.5 h-3.5" />
             <span>متأخر</span>
             <span className="font-extrabold">{ delayedDays }</span>
@@ -6860,29 +6872,30 @@ const ProjectsList = () => {
       };
     }
 
-    // ✅ متبقي: remaining_days >= 1 (أخضر) — وخاصاً 2/1 بتصميم "متبقي + يومين/يوم"
-    if (!Number.isNaN(remaining) && remaining >= 1) {
-      const dayText = remaining === 2 ? 'يومين' : 'يوم';
+    if (!Number.isNaN(remaining) && remaining > 0) {
+      let dayText = 'يوم';
+      if (remaining > 2 && remaining <= 10) dayText = 'أيام';
+      else if (remaining > 10) dayText = 'يوما';
 
       return {
         element: (
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-            <AlertCircle className="w-3.5 h-3.5 opacity-70" />
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300 shadow-sm">
             <span>متبقي</span>
             <span className="font-extrabold">{ remaining }</span>
             <span>{ dayText }</span>
           </span>
         ),
-        isOverdue: false,
+        isOverdue: isOverdue,
         isFinished: false,
       };
     }
 
-    // ✅ باقي الحالات: (remaining <= 0 ولكن ليست "متأخرة" بسبب status) → نخليها بدون badge
     return {
       element: (
-        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-          ✓ في الوقت
+        <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300 shadow-sm">
+          <span>متبقي</span>
+          <span className="font-extrabold">{Number.isNaN(remaining) ? '—' : Math.abs(remaining)}</span>
+          <span>يوم</span>
         </span>
       ),
       isOverdue: false,
@@ -6909,7 +6922,7 @@ const ProjectsList = () => {
                 <div className="flex flex-wrap items-center gap-3 text-sky-100">
                   <div className="flex items-center gap-2 bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-lg">
                     <FileText className="w-4 h-4" />
-                    <span className="font-semibold text-sm" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>إجمالي: { visibleProjects.length } مشروع</span>
+                    <span className="font-semibold text-sm" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>إجمالي: {isFinishedProjectsPage && pagination && pagination.total > 0 ? pagination.total : visibleProjects.length} مشروع</span>
                   </div>
                   { isProjectManager && (
                     <div className="flex items-center gap-2 bg-purple-500/30 backdrop-blur-md px-3 py-1.5 rounded-lg border border-purple-300/30">
@@ -8754,18 +8767,17 @@ const ProjectsList = () => {
               { (() => {
                 // حساب pagination info بناءً على ما إذا كان الترتيب حسب التاريخ أم لا
                 const isDateSort = sortConfig?.key === 'created_at' || sortConfig?.key === 'updated_at';
-                // ✅ استخدام visibleProjects.length دائماً للحصول على العدد الكلي الفعلي (بعد الفلترة، بدون المشاريع المخفية)
-                // ✅ هذا مهم لأن pagination.total قد يحتوي على مشاريع مخفية (مثل المشاريع اليومية/الشهرية خارج النطاق)
-                const totalItems = visibleProjects.length;
+                // ✅ استخدام pagination.total بدلاً من visibleProjects.length للمشاريع المجلوبة بنظام الصفحات من السيرفر
+                const totalItems = isFinishedProjectsPage && pagination && pagination.total > 0 ? pagination.total : visibleProjects.length;
                 // ✅ إذا كان perPage = 'all'، نعرض جميع المشاريع بدون pagination
                 const isShowingAll = filters.perPage === 'all' || filters.perPage === 'الكل';
                 // ✅ تحويل perPage إلى رقم للتأكد من أنه رقم صحيح
                 const perPageNumber = typeof filters.perPage === 'number' ? filters.perPage : parseInt(filters.perPage) || 10;
-                // ✅ استخدام perPageNumber دائماً عند حساب itemsPerPage (لأن visibleProjects.length هو العدد الفعلي)
+                // ✅ استخدام perPageNumber دائماً عند حساب itemsPerPage
                 const itemsPerPage = isShowingAll ? totalItems : perPageNumber;
                 const currentPage = isShowingAll ? 1 : filters.page;
-                // ✅ حساب lastPage بناءً على visibleProjects.length (العدد الفعلي المرئي)
-                const lastPage = isShowingAll ? 1 : Math.ceil(totalItems / itemsPerPage);
+                // ✅ حساب lastPage بناءً على إجمالي العناصر الحقيقي من السيرفر
+                const lastPage = isShowingAll ? 1 : (isFinishedProjectsPage && pagination && pagination.last_page ? pagination.last_page : Math.ceil(totalItems / itemsPerPage));
                 const startIndex = isShowingAll ? 1 : ((currentPage - 1) * itemsPerPage + 1);
                 const endIndex = isShowingAll ? totalItems : Math.min(currentPage * itemsPerPage, totalItems);
 

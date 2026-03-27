@@ -122,14 +122,36 @@ class ProjectProposalController extends Controller
         $userRole = strtolower($user->role ?? 'guest');
 
         // ✅ Build cache key
-        $cacheKey = $this->buildCacheKey('project_proposals', $request, $user->id, $userRole);
+        $cacheKey = $this->buildCacheKey('project_proposals_unfinished', $request, $user->id, $userRole);
 
         $ttl = $userRole === 'media_manager' ? 60 : 300;
 
         return $this->getCachedResponse($cacheKey, function () use ($request, $user, $userRole) {
             // ✅ FIX: Get data directly from query + pagination, NOT through JsonResponse->getData()
             //    This preserves all Eloquent casts, accessors, and relationship data.
-            return $this->buildIndexResponseData($request, $user, $userRole);
+            return $this->buildIndexResponseData($request, $user, $userRole, finishedOnly: false);
+        }, $ttl);
+    }
+
+    /**
+     * ✅ NEW: List finished projects only (with pagination by default).
+     */
+    public function indexFinished(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return $this->unauthorizedResponse('يجب تسجيل الدخول');
+        }
+
+        $userRole = strtolower($user->role ?? 'guest');
+
+        // ✅ Build cache key for finished projects
+        $cacheKey = $this->buildCacheKey('project_proposals_finished', $request, $user->id, $userRole);
+
+        $ttl = 300; // 5 minutes — finished projects don't change often
+
+        return $this->getCachedResponse($cacheKey, function () use ($request, $user, $userRole) {
+            return $this->buildIndexResponseData($request, $user, $userRole, finishedOnly: true);
         }, $ttl);
     }
 
@@ -139,13 +161,16 @@ class ProjectProposalController extends Controller
      *
      *    Returns a plain array that getCachedResponse() will wrap in JsonResponse.
      */
-    private function buildIndexResponseData(Request $request, $user, string $userRole): array
+    private function buildIndexResponseData(Request $request, $user, string $userRole, ?bool $finishedOnly = null): array
     {
         // Build the query using ProjectProposalQuery
-        $queryBuilder = $this->query->buildListQuery($request, $user);
+        $queryBuilder = $this->query->buildListQuery($request, $user, $finishedOnly);
 
         // Get per-page value
-        $perPage = $this->query->getPerPageValue($request, $userRole);
+        // ✅ For unfinished (finishedOnly=false): return all by default (forceAllDefault=true)
+        // ✅ For finished (finishedOnly=true): use normal pagination
+        $forceAllDefault = ($finishedOnly === false);
+        $perPage = $this->query->getPerPageValue($request, $userRole, $forceAllDefault);
 
         // Paginate
         $paginated = $queryBuilder->paginate($perPage);

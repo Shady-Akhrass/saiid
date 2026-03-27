@@ -5,7 +5,7 @@ import apiClient from '../../utils/axiosConfig';
 import { getPhotographerName, getProjectCode } from '../../utils/helpers';
 import { useCache } from '../../hooks/useCache';
 import { useCacheInvalidation } from '../../hooks/useCacheInvalidation';
-import { Search, Filter, Eye, ChevronLeft, ChevronRight, ChevronDown, X, Video, AlertCircle, UserPlus, ArrowRight, Download, CheckCircle, Pause } from 'lucide-react';
+import { Search, Filter, Eye, ChevronLeft, ChevronRight, ChevronDown, X, Video, AlertCircle, UserPlus, ArrowRight, Download, CheckCircle, Pause, Users } from 'lucide-react';
 import { toast } from 'react-toastify';
 import UpdateStatusModal from './components/UpdateStatusModal';
 import BatchStatusUpdateForm from './components/BatchStatusUpdateForm';
@@ -267,21 +267,34 @@ const MediaProjectsList = () => {
   const DEFAULT_PROJECT_TYPES = ['إغاثي', 'تنموي', 'طبي', 'تعليمي'];
 
   const renderProjectBadges = (project) => {
-    if (project?.is_daily_phase) {
-      return (
-        <div className="flex flex-wrap gap-2 mt-1">
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-            مشروع يومي
-          </span>
-          { project?.phase_day && (
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-100">
-              اليوم { project.phase_day }
-            </span>
-          ) }
-        </div>
-      );
+    const hasOrphans = project.sponsored_orphans_count > 0 || project.has_sponsored_orphans;
+    
+    if (!project?.is_daily_phase && !hasOrphans) {
+      return null;
     }
-    return null;
+
+    return (
+      <div className="flex flex-wrap gap-2 mt-1">
+        { project?.is_daily_phase && (
+          <>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+              مشروع يومي
+            </span>
+            { project?.phase_day && (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-100">
+                اليوم { project.phase_day }
+              </span>
+            ) }
+          </>
+        ) }
+        { hasOrphans && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-700 border border-purple-300 w-fit">
+            <Users className="w-3 h-3" />
+            { project.sponsored_orphans_count || 0 } يتيم مكفول
+          </span>
+        ) }
+      </div>
+    );
   };
 
   // ✅ جلب معلومات المنتج إذا كان محدداً في الـ URL
@@ -332,6 +345,25 @@ const MediaProjectsList = () => {
   const appliedTypeString = JSON.stringify(appliedFilters.project_type || []);
   const appliedSubcategoryString = JSON.stringify(appliedFilters.subcategory_id || []);
 
+  // ✅ إضافة debounce للبحث
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAppliedFilters(prev => {
+        if (prev.searchQuery !== searchInput) {
+          return { ...prev, searchQuery: searchInput, page: 1 };
+        }
+        return prev;
+      });
+      setFilters(prev => {
+        if (prev.searchQuery !== searchInput) {
+          return { ...prev, searchQuery: searchInput, page: 1 };
+        }
+        return prev;
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   useEffect(() => {
     // ✅ تقليل الاعتماد على الـ cache - مسح الـ cache إذا كان قديماً
     const cachedData = getData();
@@ -375,7 +407,7 @@ const MediaProjectsList = () => {
     appliedFilters.execution_date_from,
     appliedFilters.execution_date_to,
     appliedFilters.perPage, // ✅ إضافة perPage إلى dependencies
-    // ✅ إزالة searchQuery من dependencies - البحث يتم في Frontend فقط
+    appliedFilters.searchQuery, // ✅ تمت إعادة searchQuery للتبعيات ليتم البحث من الباك إند مع debounce
     appliedFilters.page,
     producerId,
     refreshTrigger
@@ -2255,10 +2287,8 @@ const MediaProjectsList = () => {
   };
 
   // ✅ نفس منطق getRemainingDaysBadge الموجود في project-management/projects/ProjectsList.jsx
-  const getRemainingDaysBadge = (project) => {
+      const getRemainingDaysBadge = (project) => {
     const status = (project?.status || '').trim();
-    const notDelayedStatuses = ['تم التنفيذ', 'منفذ', 'وصل للمتبرع', 'منتهي', 'ملغى'];
-    const blockWarningStatuses = ['وصل للمتبرع', 'في المونتاج', 'منتهي', 'ملغى'];
 
     if (status === 'منتهي') {
       return {
@@ -2297,7 +2327,6 @@ const MediaProjectsList = () => {
           isFinished: true,
         };
       }
-
       return {
         element: (
           <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
@@ -2310,18 +2339,18 @@ const MediaProjectsList = () => {
     }
 
     const remaining = Number(remainingRaw);
-    const isBlockedFromWarning = blockWarningStatuses.includes(status);
+    const notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'ملغى'];
+    const isOverdue = !Number.isNaN(remaining) && remaining <= 2 && !notDelayedStatuses.includes(status);
 
-    // ✅ متأخر (أحمر): remaining_days <= 0
     if (!Number.isNaN(remaining) && remaining <= 0 && !notDelayedStatuses.includes(status)) {
       const fromApi = project?.delayed_days ?? project?.delayedDays;
-      const computed = Math.max(0, 2 - remaining);
+      const computed = Math.abs(remaining);
       const raw = (fromApi != null && Number(fromApi) > 0) ? Number(fromApi) : computed;
-      const delayedDays = Math.max(1, raw);
-
+      let delayedDays = Math.max(1, raw);
+      
       return {
         element: (
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300">
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300 shadow-sm">
             <AlertCircle className="w-3.5 h-3.5" />
             <span>متأخر</span>
             <span className="font-extrabold">{delayedDays}</span>
@@ -2333,28 +2362,30 @@ const MediaProjectsList = () => {
       };
     }
 
-    // ✅ تحذير (Late): remaining_days <= 2 و الحالة ليست "وصل للمتبرع" وليست "في المونتاج"
-    if (!Number.isNaN(remaining) && remaining <= 2 && !isBlockedFromWarning) {
-      const dayText = remaining === 2 ? 'يومين' : 'يوم';
+    if (!Number.isNaN(remaining) && remaining > 0) {
+      let dayText = 'يوم';
+      if (remaining > 2 && remaining <= 10) dayText = 'أيام';
+      else if (remaining > 10) dayText = 'يوما';
+      
       return {
         element: (
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
-            <AlertCircle className="w-3.5 h-3.5" />
-            <span>تحذير</span>
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300 shadow-sm">
+            <span>متبقي</span>
             <span className="font-extrabold">{remaining}</span>
             <span>{dayText}</span>
           </span>
         ),
-        isOverdue: true,
+        isOverdue: isOverdue,
         isFinished: false,
       };
     }
 
     return {
       element: (
-        <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
+        <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300 shadow-sm">
+          <span>متبقي</span>
           <span className="font-extrabold">{Number.isNaN(remaining) ? '—' : Math.abs(remaining)}</span>
-          <span>يوم متبقي</span>
+          <span>يوم</span>
         </span>
       ),
       isOverdue: false,

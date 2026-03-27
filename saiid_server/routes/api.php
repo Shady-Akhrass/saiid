@@ -439,6 +439,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // ✅ استخدام rate limiting محدد لتجنب 429 Too Many Requests
     Route::middleware('throttle:project-proposals')->group(function () {
         Route::get('/project-proposals', [ProjectProposalController::class, 'index']);
+        // ✅ Route للمشاريع المنتهية فقط (مع pagination افتراضي)
+        Route::get('/project-proposals/finished', [ProjectProposalController::class, 'indexFinished']);
         // ✅ Route للاختبار والتشخيص
         Route::get('/project-proposals/debug-data', function() {
             try {

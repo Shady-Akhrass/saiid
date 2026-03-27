@@ -53,7 +53,10 @@ class CacheService
      *    Eliminates the duplicated match/if-else chains.
      */
     private const TYPE_MAP = [
-        'projects'      => ['tag' => 'projects',      'version_key' => 'cache_version_projects'],
+        'projects'                     => ['tag' => 'projects',      'version_key' => 'cache_version_projects'],
+        'project_proposals'            => ['tag' => 'projects',      'version_key' => 'cache_version_projects'],
+        'project_proposals_unfinished' => ['tag' => 'projects',      'version_key' => 'cache_version_projects'],
+        'project_proposals_finished'   => ['tag' => 'projects',      'version_key' => 'cache_version_projects'],
         'notifications' => ['tag' => 'notifications', 'version_key' => 'cache_version_notifications'],
         'dashboard'     => ['tag' => 'dashboard',     'version_key' => 'cache_version_dashboard'],
         'users'         => ['tag' => 'users',         'version_key' => 'cache_version_users'],

@@ -2544,6 +2544,10 @@ class ProjectProposal extends Model
      */
     public function getSponsoredOrphansCountAttribute()
     {
+        // ✅ منع N+1 query: إذا تم حساب العدد باستخدام withCount
+        if (array_key_exists('sponsored_orphans_count', $this->attributes)) {
+            return (int) $this->attributes['sponsored_orphans_count'];
+        }
         return $this->getSponsoredOrphansCount();
     }
 

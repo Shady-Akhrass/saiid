@@ -289,15 +289,16 @@ export const AddOrphansModal = ({ isOpen, onClose, projectId, project, onSuccess
             toast.error(`لا يمكن إضافة الأيتام - حالة المشروع الحالية هي "${project?.status}"`);
             return;
         }
+
+        // Sanitize payload
+        const payload = {
+            orphan_ids: selectedOrphanIds,
+            is_recurring: !!isRecurring,
+            sponsorship_end_date: sponsorshipEndDate || null,
+        };
+
         setLoading(true);
         try {
-            // Sanitize payload
-            const payload = {
-                orphan_ids: selectedOrphanIds,
-                is_recurring: !!isRecurring,
-                sponsorship_end_date: sponsorshipEndDate || null,
-            };
-
             const response = await apiClient.post(`/project-proposals/${projectId}/orphans`, payload);
             if (response.data.success) {
                 toast.success(response.data.message || `تم إضافة ${selectedOrphanIds.length} يتيم بنجاح`);

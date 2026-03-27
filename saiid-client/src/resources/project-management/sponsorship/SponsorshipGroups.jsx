@@ -47,6 +47,7 @@ const SponsorshipGroups = () => {
   const [projectTypes, setProjectTypes] = useState([]);
   const [projectSubcategories, setProjectSubcategories] = useState([]);
   const [projectFormData, setProjectFormData] = useState({
+    project_name: '',
     estimated_duration_days: '',
     project_type_id: '',
     subcategory_id: '',
@@ -182,30 +183,35 @@ const SponsorshipGroups = () => {
 
   const openProjectModal = async (groupId) => {
     setProjectModalGroupId(groupId);
-    setProjectFormData({ estimated_duration_days: '', project_type_id: '', subcategory_id: '', sponsorship_item_ids: [] });
+    const group = groups.find(g => g.id === groupId);
+    const groupName = group ? group.name : '';
+    setProjectFormData({ project_name: groupName, estimated_duration_days: '', project_type_id: '', subcategory_id: '', sponsorship_item_ids: [] });
+    
     if (groupItems[groupId] === undefined) {
       fetchItemsQuietly(groupId);
     }
-    // Auto-load subcategories for the sponsorship type ('الكفالات')
+
     try {
       const typesRes = await apiClient.get('/project-types');
       const types = typesRes.data?.data || typesRes.data?.project_types || typesRes.data || [];
       const sponsorshipType = types.find(t => t.name && t.name.includes('كفالات'));
       if (sponsorshipType) {
         setProjectFormData(prev => ({ ...prev, project_type_id: String(sponsorshipType.id) }));
-        // fetchProjectSubcategories will be triggered by the useEffect above
       }
-    } catch (err) {
-      console.warn('Could not auto-load sponsorship type');
+    } catch(err) {
+      // ignore
     }
+
     setShowProjectModal(true);
   };
+
 
   const handleCreateAsProject = async (e) => {
     e.preventDefault();
     setCreatingProject(true);
     try {
       const payload = {
+        project_name: projectFormData.project_name?.trim() || null,
         estimated_duration_days: projectFormData.estimated_duration_days ? parseInt(projectFormData.estimated_duration_days) : null,
         project_type_id: projectFormData.project_type_id ? parseInt(projectFormData.project_type_id) : null,
       };
@@ -542,6 +548,18 @@ const SponsorshipGroups = () => {
             <p className="text-sm text-gray-500 mb-4">يرجى تعبئة البيانات المطلوبة لإنشاء مشاريع من كفالات هذه المجموعة</p>
             <form onSubmit={handleCreateAsProject} className="space-y-4">
 
+              {/* Project Name (optional - applies to all created projects) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">اسم المشروع (اختياري)</label>
+                <input
+                  type="text"
+                  value={projectFormData.project_name}
+                  onChange={(e) => setProjectFormData({ ...projectFormData, project_name: e.target.value })}
+                  placeholder="يطبق على جميع الكفالات المختارة (اترك فارغاً لاستخدام اسم الكفالة)"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+              </div>
+
               {/* Estimated Duration */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
@@ -583,7 +601,7 @@ const SponsorshipGroups = () => {
                 >
                   <option value="">اختر التفريعة (اختياري)</option>
                   {projectSubcategories.map(cat => (
-                    <option key={cat.id} value={String(cat.id)}>{cat.name}</option>
+                    <option key={cat.id} value={String(cat.id)}>{cat.name_ar || cat.name}</option>
                   ))}
                 </select>
                 {projectSubcategories.length === 0 && projectFormData.project_type_id && (

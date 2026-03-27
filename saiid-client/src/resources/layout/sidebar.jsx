@@ -932,12 +932,6 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
           ),
         },
         {
-          name: "pmSponsorshipGroups",
-          label: "مجموعات الكفالات",
-          route: "sponsorship-groups",
-          icon: <FolderOpen className="w-5 h-5" />,
-        },
-        {
           name: "pmNotifications",
           label: "الإشعارات",
           route: "notifications",

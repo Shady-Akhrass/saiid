@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
-import apiClient from '../../../utils/axiosConfig';
+import apiClient, { getImageBaseUrl } from '../../../utils/axiosConfig';
 import { toast } from 'react-toastify';
 import {
   Plus, Edit, Trash2, ArrowLeft, Save, X, Loader2,
@@ -22,6 +22,9 @@ const SponsorshipItems = () => {
   const [submitting, setSubmitting] = useState(false);
   const [selectedImages, setSelectedImages] = useState([]);
   const [imagePreviews, setImagePreviews] = useState([]);
+  
+  // Get base URL for images
+  const imageBaseUrl = getImageBaseUrl();
 
   const emptyForm = {
     name: '',
@@ -38,11 +41,12 @@ const SponsorshipItems = () => {
   const generateDonorCode = (name, existingItems, currentItemId = null) => {
     if (!name || !name.trim()) return '';
     const trimmed = name.trim();
-    const prefix = 'S-' + trimmed.slice(0, 2);
+    // lowercase prefix
+    const prefix = 's-' + trimmed.slice(0, 2).toLowerCase();
     // Count existing items with same prefix (excluding current if editing)
     const existing = (existingItems || []).filter(it => {
       if (currentItemId && it.id === currentItemId) return false;
-      return (it.donor_code || '').startsWith(prefix + '-');
+      return (it.donor_code || '').toLowerCase().startsWith(prefix + '-');
     });
     const seq = existing.length + 1;
     return prefix + '-' + String(seq).padStart(4, '0');
@@ -311,7 +315,7 @@ const SponsorshipItems = () => {
             <div className="text-center py-20">
               <FileText className="mx-auto text-gray-300 mb-4" size={60} />
               <p className="text-gray-500 text-lg">لا توجد كفالات في هذه المجموعة</p>
-              <button onClick={openCreate} className="mt-4 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">إضافة كفالة</button>
+              <button onClick={openCreate} className="mt-4 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">إضافة كفيل</button>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -389,7 +393,7 @@ const SponsorshipItems = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Name */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">اسم الكفالة / المشروع *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">اسم الكفيل / المشروع *</label>
                 <input
                   type="text"
                   value={formData.name}
@@ -411,7 +415,7 @@ const SponsorshipItems = () => {
               {/* Donor Code - auto-generated */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-sm font-medium text-gray-700">كود المتبرع (مباشر)</label>
+                  <label className="text-sm font-medium text-gray-700">كود المتبرع (تلقائي)</label>
                   <button
                     type="button"
                     onClick={() => {
@@ -461,7 +465,7 @@ const SponsorshipItems = () => {
               {/* Cost + Currency */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">التكلفة *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">المبلغ قبل الخصم *</label>
                   <input type="number" min="0" step="0.01" value={formData.cost} onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
                     placeholder="0.00" required
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
@@ -563,7 +567,7 @@ const SponsorshipItems = () => {
                       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
                         {editingItem.images.map((path, i) => (
                           <div key={i} className="relative rounded-xl border border-gray-200 overflow-hidden">
-                            <img src={`/storage/${path}`} alt="" className="w-full h-20 object-cover" />
+                            <img src={`${imageBaseUrl}/project_notes_images/${path.split('/').pop()}`} alt="" className="w-full h-20 object-cover" />
                           </div>
                         ))}
                       </div>

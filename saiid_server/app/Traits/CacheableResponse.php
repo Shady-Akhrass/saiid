@@ -53,7 +53,9 @@ trait CacheableResponse
             'excel'  => $request->get('has_excel') ?: null,
         ];
 
-        return CacheService::buildKey($prefix, $params);
+        $version = CacheService::getVersion($prefix);
+
+        return CacheService::buildKey($prefix, $params, $version);
     }
 
     /**

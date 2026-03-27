@@ -305,6 +305,7 @@ class SponsorshipGroupController extends Controller
     public function createAsProject(Request $request, $id)
     {
         $request->validate([
+            'project_name' => 'nullable|string|max:500',
             'exchange_rate' => 'nullable|numeric|min:0',
             'estimated_duration_days' => 'nullable|integer|min:1',
             'project_type_id' => 'nullable|integer|exists:project_types,id',
@@ -312,6 +313,8 @@ class SponsorshipGroupController extends Controller
             'sponsorship_item_ids' => 'nullable|array',
             'sponsorship_item_ids.*' => 'integer|exists:sponsorship_items,id',
         ]);
+
+        $overrideProjectName = $request->filled('project_name') ? trim($request->project_name) : null;
 
         $group = SponsorshipGroup::with(['items.currency'])->findOrFail($id);
 
@@ -345,7 +348,11 @@ class SponsorshipGroupController extends Controller
         $exchangeRate = $request->exchange_rate ?? 1.0;
         $estimatedDuration = $request->estimated_duration_days;
 
+        // ✅ Track sequences per code prefix within this batch to prevent duplicates
+        $usedSequences = [];
+
         DB::beginTransaction();
+
         try {
             foreach ($itemsToProcess as $item) {
                 $discountPct = $item->discount_percentage ?? 0;
@@ -358,32 +365,57 @@ class SponsorshipGroupController extends Controller
                     $firstNoteImagePath = 'project_notes_images/' . basename($item->images[0]);
                 }
 
-                // ✅ Auto-generate Code: S-[First 2 letters]-[Sequence]
-                $namePrefix = mb_substr(trim($item->name), 0, 2, 'UTF-8');
-                // Replace spaces if the first two chars have them, optional.
-                $namePrefix = str_replace(' ', '', $namePrefix);
-                // Ensure we have at least 2 chars if possible, otherwise pad it
-                $namePrefix = mb_str_pad($namePrefix, 2, 'X', STR_PAD_RIGHT, 'UTF-8');
-                
-                $codePrefix = 'S-' . $namePrefix;
-                
-                // Find existing projects for this item to determine sequence
-                $lastProject = ProjectProposal::where('project_name', $item->name)
-                    ->where('donor_code', 'LIKE', $codePrefix . '-%')
-                    ->orderBy('id', 'desc')
-                    ->first();
-                
-                $sequence = 1;
-                if ($lastProject && preg_match('/-(\d+)$/', $lastProject->donor_code, $matches)) {
-                    $sequence = intval($matches[1]) + 1;
+                // ✅ Use item's existing donor_code as the project code (lowercase)
+                // If it already has one, we use it for the project, then INCREMENT it and save it back to the item.
+                $projectCode = null;
+                $nextItemCode = null;
+
+                if (!empty($item->donor_code)) {
+                    $projectCode = strtolower(trim($item->donor_code));
+                    
+                    // Predict the next code for the item (e.g., s-فا-0001 -> s-فا-0002)
+                    if (preg_match('/^(.*?)-(\d+)$/', $projectCode, $matches)) {
+                        $prefix = $matches[1];
+                        $seq = intval($matches[2]) + 1;
+                        $nextItemCode = $prefix . '-' . str_pad($seq, 4, '0', STR_PAD_LEFT);
+                    } else {
+                        $nextItemCode = $projectCode . '-0001';
+                    }
+                } else {
+                    // Auto-generate if item didn't have a code
+                    $projectNameForCode = $overrideProjectName ?? $group->name;
+                    $namePrefix = mb_strtolower(mb_substr(trim($projectNameForCode), 0, 2, 'UTF-8'), 'UTF-8');
+                    $namePrefix = str_replace(' ', '', $namePrefix);
+                    if (mb_strlen($namePrefix, 'UTF-8') < 2) {
+                        $namePrefix = mb_str_pad($namePrefix, 2, 'x', STR_PAD_RIGHT, 'UTF-8');
+                    }
+                    $codePrefix = 's-' . $namePrefix;
+
+                    // Seed from DB max on first encounter in this batch, then track in-memory
+                    if (!isset($usedSequences[$codePrefix])) {
+                        $lastProject = ProjectProposal::where('donor_code', 'LIKE', $codePrefix . '-%')
+                            ->orderBy('id', 'desc')
+                            ->first();
+                        $startSeq = 0;
+                        if ($lastProject && preg_match('/-(\d+)$/', $lastProject->donor_code, $matches)) {
+                            $startSeq = intval($matches[1]);
+                        }
+                        $usedSequences[$codePrefix] = $startSeq;
+                    }
+
+                    // Increment for this item
+                    $usedSequences[$codePrefix]++;
+                    $projectCode = $codePrefix . '-' . str_pad($usedSequences[$codePrefix], 4, '0', STR_PAD_LEFT);
+                    $nextItemCode = $codePrefix . '-' . str_pad($usedSequences[$codePrefix] + 1, 4, '0', STR_PAD_LEFT);
                 }
-                
-                $generatedCode = $codePrefix . '-' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
+
+
+
 
                 $project = ProjectProposal::create([
-                    'project_name' => $item->name,
-                    'donor_code' => $generatedCode,
-                    'donor_name' => $group->name,
+                    'project_name' => $overrideProjectName ?? $group->name,
+                    'donor_code' => $projectCode,
+                    'donor_name' => $item->name,
                     'project_type_id' => $projectTypeId,
                     'subcategory_id' => $request->subcategory_id,
                     'donation_amount' => $item->cost,
@@ -400,6 +432,11 @@ class SponsorshipGroupController extends Controller
                     'status' => 'جديد',
                     'created_by' => auth()->id(),
                 ]);
+
+                // Update the item's donor_code so the NEXT project creation will use the incremented sequence
+                if ($nextItemCode) {
+                    $item->update(['donor_code' => $nextItemCode]);
+                }
 
                 // Copy images correctly as "note" type to the PUBLIC directory
                 if (!empty($item->images)) {

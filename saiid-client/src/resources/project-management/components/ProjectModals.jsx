@@ -6,115 +6,20 @@ import { useDebounce } from '../../../hooks/useDebounce';
 import { getProjectCode } from '../../../utils/helpers';
 
 // ✅ دالة للتحقق من أن المشروع هو مشروع كفالة أيتام
-// ✅ تدعم قراءة project_type و subcategory من parent_project للمشاريع الفرعية
 const isOrphanSponsorshipProject = (project) => {
     if (!project) return false;
 
-    try {
-        // ✅ للمشاريع الفرعية: قراءة project_type و subcategory من parent_project
-        const parentProject = project.parent_project || project.parentProject || null;
-        const hasParentProjectId = project.parent_project_id != null && project.parent_project_id !== undefined;
-        const isSubProject = hasParentProjectId ||
-            project.is_monthly_phase === true ||
-            project.is_daily_phase === true ||
-            project.month_number != null ||
-            project.phase_day != null;
+    const projectType = typeof project.project_type === 'object' && project.project_type !== null
+        ? (project.project_type.name_ar || project.project_type.name || project.project_type.name_en || '')
+        : (project.project_type || '');
 
-        // ✅ التحقق من project_type (من المشروع نفسه أو من parent_project)
-        let projectType = '';
-        if (typeof project.project_type === 'object' && project.project_type !== null) {
-            projectType = project.project_type.name_ar || project.project_type.name || project.project_type.name_en || '';
-        } else if (project.project_type != null) {
-            projectType = String(project.project_type);
-        }
+    if (projectType !== 'الكفالات') return false;
 
-        // ✅ إذا كان المشروع فرعي ولم يكن له project_type، نقرأه من parent_project
-        if ((!projectType || projectType.trim() === '') && isSubProject && parentProject) {
-            if (typeof parentProject.project_type === 'object' && parentProject.project_type !== null) {
-                projectType = parentProject.project_type.name_ar || parentProject.project_type.name || parentProject.project_type.name_en || '';
-            } else if (parentProject.project_type != null) {
-                projectType = String(parentProject.project_type);
-            }
-        }
+    const subcategory = project.subcategory || {};
+    const subcategoryNameAr = subcategory.name_ar || '';
+    const subcategoryName = subcategory.name || '';
 
-        // ✅ التحقق من أن نوع المشروع هو "الكفالات" أو "كفالات" (أكثر مرونة)
-        const projectTypeStr = (projectType || '').trim();
-        const isSponsorshipType = projectTypeStr === 'الكفالات' ||
-            projectTypeStr === 'كفالات' ||
-            projectTypeStr.toLowerCase() === 'الكفالات' ||
-            projectTypeStr.toLowerCase() === 'كفالات' ||
-            projectTypeStr.includes('كفالات') ||
-            projectTypeStr.includes('كفالة');
-
-        // ✅ إذا كان المشروع شهري فرعي وله parent_project_id، نعتبره مشروع كفالة حتى لو لم نجد project_type
-        if (!isSponsorshipType && isSubProject && (project.is_monthly_phase || project.month_number != null)) {
-            if (parentProject) {
-                let parentProjectType = '';
-                if (typeof parentProject.project_type === 'object' && parentProject.project_type !== null) {
-                    parentProjectType = parentProject.project_type.name_ar || parentProject.project_type.name || parentProject.project_type.name_en || '';
-                } else if (parentProject.project_type != null) {
-                    parentProjectType = String(parentProject.project_type);
-                }
-                const parentProjectTypeStr = (parentProjectType || '').trim();
-                const isParentSponsorshipType = parentProjectTypeStr === 'الكفالات' ||
-                    parentProjectTypeStr === 'كفالات' ||
-                    parentProjectTypeStr.toLowerCase() === 'الكفالات' ||
-                    parentProjectTypeStr.toLowerCase() === 'كفالات' ||
-                    parentProjectTypeStr.includes('كفالات') ||
-                    parentProjectTypeStr.includes('كفالة');
-
-                if (isParentSponsorshipType) {
-                    return true;
-                }
-            }
-            return true;
-        }
-
-        if (!isSponsorshipType) {
-            return false;
-        }
-
-        // ✅ التحقق من subcategory (من المشروع نفسه أو من parent_project)
-        let subcategory = project.subcategory || {};
-
-        if ((!subcategory || Object.keys(subcategory).length === 0) && isSubProject && parentProject) {
-            subcategory = parentProject.subcategory || parentProject.sub_category || {};
-        }
-
-        let subcategoryNameAr = '';
-        let subcategoryName = '';
-        let subcategoryNameEn = '';
-
-        if (subcategory.name_ar != null) {
-            subcategoryNameAr = String(subcategory.name_ar).trim();
-        }
-        if (subcategory.name != null) {
-            subcategoryName = String(subcategory.name).trim();
-        }
-        if (subcategory.name_en != null) {
-            subcategoryNameEn = String(subcategory.name_en).trim();
-        }
-
-        const isOrphanSponsorship = subcategoryNameAr === 'كفالة أيتام' ||
-            subcategoryName === 'Orphan Sponsorship' ||
-            subcategoryNameEn === 'Orphan Sponsorship' ||
-            subcategoryNameAr.includes('كفالة أيتام') ||
-            subcategoryNameAr.includes('أيتام') ||
-            (subcategoryName && subcategoryName.toLowerCase().includes('orphan sponsorship')) ||
-            (subcategoryName && subcategoryName.toLowerCase().includes('orphan')) ||
-            (subcategoryNameEn && subcategoryNameEn.toLowerCase().includes('orphan sponsorship')) ||
-            (subcategoryNameEn && subcategoryNameEn.toLowerCase().includes('orphan'));
-
-        return isSponsorshipType && isOrphanSponsorship;
-    } catch (error) {
-        if (import.meta.env.DEV) {
-            console.error('❌ Error in isOrphanSponsorshipProject:', error, {
-                project: project?.id,
-                parentProject: project?.parent_project?.id || project?.parentProject?.id,
-            });
-        }
-        return false;
-    }
+    return subcategoryNameAr === 'كفالة أيتام' || subcategoryName === 'Orphan Sponsorship';
 };
 
 // Modal إسناد المشروع للباحث
@@ -1129,4 +1034,13 @@ export const UpdateMediaStatusModal = ({ isOpen, onClose, projectId, onSuccess }
             </div>
         </div>
     );
+};
+
+// ✅ Export جميع المكونات بشكل صريح
+export default {
+    AssignProjectModal,
+    AssignPhotographerModal,
+    BulkAssignPhotographerModal,
+    SelectShelterModal,
+    UpdateMediaStatusModal,
 };

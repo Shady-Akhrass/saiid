@@ -90,12 +90,17 @@ class ProjectProposalQuery
      *
      * Returns the same Builder shape — no change in output structure.
      */
-    public function buildListQuery(Request $request, User $user): Builder
+    public function buildListQuery(Request $request, User $user, ?bool $finishedOnly = null): Builder
     {
         $userRole = strtolower($user->role ?? 'guest');
         $userId   = $user->id ?? 0;
 
         $query = ProjectProposal::query();
+
+        // ✅ Finished/Unfinished status filter (applied before role filters)
+        if ($finishedOnly !== null) {
+            $this->applyFinishedStatusFilter($query, $finishedOnly);
+        }
 
         // Role-based filtering
         $this->applyRoleFilters($query, $userRole, $userId);
@@ -122,6 +127,20 @@ class ProjectProposalQuery
         $this->applySorting($query, $request);
 
         return $query;
+    }
+
+    /**
+     * ✅ Filter by finished or unfinished status.
+     *    - finishedOnly=true  → only 'منتهي'
+     *    - finishedOnly=false → everything except 'منتهي'
+     */
+    public function applyFinishedStatusFilter(Builder $query, bool $finishedOnly): void
+    {
+        if ($finishedOnly) {
+            $query->where('status', 'منتهي');
+        } else {
+            $query->where('status', '!=', 'منتهي');
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -331,7 +350,7 @@ class ProjectProposalQuery
      */
     private function applySearchFilter(Builder $query, Request $request): void
     {
-        $searchQuery = trim((string) $request->get('searchQuery', ''));
+        $searchQuery = trim((string) $request->get('searchQuery', $request->get('search', '')));
 
         if ($searchQuery === '') {
             return;
@@ -418,10 +437,12 @@ class ProjectProposalQuery
     {
         // ✅ DRY: All integer-FK filters in one loop
         $integerFilters = [
-            'team_id'         => 'assigned_to_team_id',
-            'photographer_id' => 'assigned_photographer_id',
-            'shelter_id'      => 'shelter_id',
-            'subcategory_id'  => 'subcategory_id',
+            'team_id'             => 'assigned_to_team_id',
+            'photographer_id'     => 'assigned_photographer_id',
+            'researcher_id'       => 'assigned_researcher_id',
+            'montage_producer_id' => 'assigned_montage_producer_id',
+            'shelter_id'          => 'shelter_id',
+            'subcategory_id'      => 'subcategory_id',
         ];
 
         foreach ($integerFilters as $requestParam => $dbColumn) {
@@ -433,6 +454,42 @@ class ProjectProposalQuery
         // Phase type filter
         if ($request->filled('phase_type')) {
             $this->applyPhaseTypeFilter($query, $request->input('phase_type'));
+        }
+
+        // Montage status multi-value filter
+        if ($request->filled('montage_status')) {
+            $this->applyMultiValueFilter($query, 'status', $request->input('montage_status'));
+        }
+
+        // Montage statuses only (for Media Manager projects list)
+        if ($request->boolean('montage_statuses_only')) {
+            $query->whereIn('status', [
+                'جاهز للتنفيذ', 'تم اختيار المخيم', 'قيد التنفيذ', 
+                'تم التنفيذ', 'في المونتاج', 'تم المونتاج', 
+                'معاد مونتاجه', 'وصل للمتبرع'
+            ]);
+        }
+
+        // Delayed filter
+        if ($request->boolean('is_delayed')) {
+            $notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'تم التنفيذ', 'منفذ', 'ملغى'];
+            $query->whereNotIn('status', $notDelayedStatuses)
+                ->where(function (Builder $q) {
+                    $q->where(function (Builder $subQ) {
+                        $subQ->where('is_daily_phase', true)
+                             ->whereNotNull('execution_date')
+                             ->whereRaw("DATEDIFF(execution_date, NOW()) <= 0");
+                    })
+                    ->orWhere(function (Builder $subQ) {
+                        $subQ->where(function(Builder $qq) {
+                            $qq->where('is_daily_phase', false)
+                               ->orWhereNull('is_daily_phase');
+                        })
+                        ->whereNotNull('created_at')
+                        ->whereNotNull('estimated_duration_days')
+                        ->whereRaw("DATEDIFF(NOW(), created_at) >= estimated_duration_days");
+                    });
+                });
         }
     }
 
@@ -483,6 +540,7 @@ class ProjectProposalQuery
         }
 
         $query->with($relations);
+        $query->withCount('sponsoredOrphans');
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -527,10 +585,25 @@ class ProjectProposalQuery
     private const PER_PAGE_MAX_MEDIA_MANAGER          = 1000;
     private const PER_PAGE_MAX_ORPHAN_COORDINATOR     = 5000;
     private const PER_PAGE_MAX_REPORTS                = 10000;
+    private const PER_PAGE_UNFINISHED_DEFAULT         = 5000;
 
-    public function getPerPageValue(Request $request, string $userRole): int
+    /**
+     * @param bool $forceAllDefault  When true (unfinished endpoint), return all results by default
+     *                               unless the client explicitly sends per_page.
+     */
+    public function getPerPageValue(Request $request, string $userRole, bool $forceAllDefault = false): int
     {
-        $perPageInput = $request->query('per_page', $request->query('perPage', self::PER_PAGE_DEFAULT));
+        $perPageInput = $request->query('per_page', $request->query('perPage', null));
+
+        // ── Unfinished endpoint default: return all unless client sends per_page ─
+        if ($forceAllDefault && $perPageInput === null) {
+            return self::PER_PAGE_UNFINISHED_DEFAULT;
+        }
+
+        // Fallback to default if no per_page was given
+        if ($perPageInput === null) {
+            $perPageInput = self::PER_PAGE_DEFAULT;
+        }
 
         $hasDateFilter = $request->hasAny(['start_date', 'end_date', 'created_at_start', 'created_at_end']);
 
@@ -549,6 +622,10 @@ class ProjectProposalQuery
 
         // ── "all" / "الكل" requests: require at least one filter ───────────
         if ($perPageInput === 'all' || $perPageInput === 'الكل') {
+            // ✅ When forceAllDefault is true, skip the filter requirement
+            if ($forceAllDefault) {
+                return self::PER_PAGE_UNFINISHED_DEFAULT;
+            }
             return $this->resolveAllPerPage($request, $userRole);
         }
 
@@ -584,9 +661,11 @@ class ProjectProposalQuery
         $hasFilter = ($request->filled('status') && $request->get('status') !== 'all')
             || ($request->filled('project_type') && $request->get('project_type') !== 'all')
             || $request->filled('searchQuery')
+            || $request->filled('search')
             || $request->filled('team_id')
             || $request->filled('photographer_id')
             || $request->filled('shelter_id')
+            || $request->boolean('montage_statuses_only')
             || $request->hasAny(['start_date', 'end_date', 'created_at_start', 'created_at_end']);
 
         if (!$hasFilter) {

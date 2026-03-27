@@ -193,7 +193,7 @@ class ProjectsCacheService
         do {
             $result = $redis->scan(
                 $cursor,
-                ['MATCH' => '*projects_*_v*', 'COUNT' => self::SCAN_BATCH_SIZE]
+                ['MATCH' => '*project*_v*', 'COUNT' => self::SCAN_BATCH_SIZE]
             );
 
             // ✅ Guard: some Redis clients return false on error
