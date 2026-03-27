@@ -1295,6 +1295,7 @@ const ProjectsList = () => {
 
   const fetchProjects = async (options = {}) => {
     const { skipLoading = false, forceRefresh = false } = options;
+    let shouldFetchAll = false;
 
     try {
       // ✅ إذا كان forceRefresh = true، امسح الكاش المحلي
@@ -8386,7 +8387,7 @@ const ProjectsList = () => {
                                     </button>
                                   )}
                                   {/* ✅ زر نقل للتوريد - لمشاريع الكفالة (منسق الأيتام) */}
-                                  {isOrphanSponsorshipProject(project) &&
+                                  {isSponsorshipProject(project) &&
                                     isOrphanSponsorCoordinator && (
                                       <button
                                         onClick={() => handleTransferToSupply(project)}
@@ -8397,7 +8398,7 @@ const ProjectsList = () => {
                                       </button>
                                     )}
                                   {/* ✅ زر إسناد باحث - لمشاريع الكفالة (منسق الأيتام) - متاح في كل المراحل */}
-                                  {isOrphanSponsorshipProject(project) &&
+                                  {isSponsorshipProject(project) &&
                                     isOrphanSponsorCoordinator && (
                                       <button
                                         onClick={() => {
@@ -8411,7 +8412,7 @@ const ProjectsList = () => {
                                       </button>
                                     )}
                                   {/* ✅ زر إدارة الأيتام - لمشاريع الكفالة (متاح في كل المراحل) */}
-                                  {isOrphanSponsorshipProject(project) &&
+                                  {isSponsorshipProject(project) &&
                                     (isOrphanSponsorCoordinator || isAdmin) && (
                                       <button
                                         onClick={() => handleOpenOrphansModal(project)}
@@ -8422,7 +8423,7 @@ const ProjectsList = () => {
                                       </button>
                                     )}
                                   {/* ✅ زر نقل للتنفيذ بدون مخيم - لمشاريع الكفالة */}
-                                  {isOrphanSponsorshipProject(project) &&
+                                  {isSponsorshipProject(project) &&
                                     project.status === 'جاهز للتنفيذ' &&
                                     (isOrphanSponsorCoordinator || isExecutedCoordinator || isAdmin) && (
                                       <button
@@ -8578,7 +8579,7 @@ const ProjectsList = () => {
                                     </button>
                                   )}
                                   {/* ✅ زر نقل للتوريد - لمشاريع الكفالة (منسق الأيتام) */}
-                                  {isOrphanSponsorshipProject(project) &&
+                                  {isSponsorshipProject(project) &&
                                     isOrphanSponsorCoordinator && (
                                       <button
                                         onClick={() => handleTransferToSupply(project)}
@@ -8589,7 +8590,7 @@ const ProjectsList = () => {
                                       </button>
                                     )}
                                   {/* ✅ زر إسناد باحث - لمشاريع الكفالة (منسق الأيتام) - متاح في كل المراحل */}
-                                  {isOrphanSponsorshipProject(project) &&
+                                  {isSponsorshipProject(project) &&
                                     isOrphanSponsorCoordinator && (
                                       <button
                                         onClick={() => {
@@ -8603,7 +8604,7 @@ const ProjectsList = () => {
                                       </button>
                                     )}
                                   {/* ✅ زر إدارة الأيتام - لمشاريع الكفالة (متاح في كل المراحل) */}
-                                  {isOrphanSponsorshipProject(project) &&
+                                  {isSponsorshipProject(project) &&
                                     (isOrphanSponsorCoordinator || isAdmin) && (
                                       <button
                                         onClick={() => handleOpenOrphansModal(project)}
@@ -10533,4 +10534,3 @@ const ShekelConversionModal = ({ isOpen, onClose, project, exchangeRate, setExch
 };
 
 export default ProjectsList;
-

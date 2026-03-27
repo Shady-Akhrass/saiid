@@ -73,6 +73,7 @@ class ProjectProposalQuery
         'admin',
         'executed_projects_coordinator',
         'media_manager',
+        'orphan_sponsor_coordinator',
     ];
 
     /**
@@ -201,6 +202,13 @@ class ProjectProposalQuery
                                ->where('status', '!=', 'جديد')
                       );
                 });
+                break;
+
+            case 'orphan_sponsor_coordinator':
+                // Orphan coordinators see all sponsorship projects
+                $query->where('project_type', 'الكفالات');
+                // Also apply admin filter to handle divided projects correctly (exclude parents)
+                $this->applyAdminFilter($query);
                 break;
 
             default:
@@ -470,7 +478,7 @@ class ProjectProposalQuery
             $relations[] = 'assignedMontageProducer:id,name,phone_number,email';
         }
 
-        if (in_array($userRole, ['executed_projects_coordinator', 'admin', 'media_manager'], true)) {
+        if (in_array($userRole, ['executed_projects_coordinator', 'admin', 'media_manager', 'orphan_sponsor_coordinator'], true)) {
             $relations[] = 'shelter:manager_id_number,camp_name';
         }
 

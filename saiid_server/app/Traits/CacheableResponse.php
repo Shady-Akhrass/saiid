@@ -40,7 +40,7 @@ trait CacheableResponse
             'status' => $request->get('status', 'all'),
             'type'   => $request->get('type', $request->get('project_type', 'all')),
             'page'   => (int) $request->query('page', 1),
-            'pp'     => min((int) $request->query('perPage', $request->query('per_page', 15)), 500),
+            'pp'     => min((int) $request->query('perPage', $request->query('per_page', 15)), 5000),
             'sort'   => $request->get('sort_by', $request->get('sort', 'default')),
             'q'      => $request->get('searchQuery', '') ?: null,
             'flags'  => $request->only(['unread_only', 'active_only', 'include_executed']) ?: null,

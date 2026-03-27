@@ -33,6 +33,20 @@ const SponsorshipItems = () => {
     notes: '',
   };
   const [formData, setFormData] = useState(emptyForm);
+  const [donorCodeManual, setDonorCodeManual] = useState(false);
+
+  const generateDonorCode = (name, existingItems, currentItemId = null) => {
+    if (!name || !name.trim()) return '';
+    const trimmed = name.trim();
+    const prefix = 'S-' + trimmed.slice(0, 2);
+    // Count existing items with same prefix (excluding current if editing)
+    const existing = (existingItems || []).filter(it => {
+      if (currentItemId && it.id === currentItemId) return false;
+      return (it.donor_code || '').startsWith(prefix + '-');
+    });
+    const seq = existing.length + 1;
+    return prefix + '-' + String(seq).padStart(4, '0');
+  };
 
   useEffect(() => {
     fetchItems();
@@ -76,7 +90,7 @@ const SponsorshipItems = () => {
     const files = Array.from(e.target.files || []);
     const valid = files.filter(f => f.type.startsWith('image/') && f.size <= 5 * 1024 * 1024);
     if (valid.length !== files.length) toast.warning('بعض الملفات تم تجاهلها (غير صورة أو أكبر من 5MB)');
-    
+
     setSelectedImages(prev => [...prev, ...valid]);
     const newPreviews = valid.map(f => URL.createObjectURL(f));
     setImagePreviews(prev => [...prev, ...newPreviews]);
@@ -149,6 +163,7 @@ const SponsorshipItems = () => {
 
   const openEdit = (item) => {
     setEditingItem(item);
+    setDonorCodeManual(true); // editing: keep existing code
     setFormData({
       name: item.name || '',
       donor_code: item.donor_code || '',
@@ -165,6 +180,7 @@ const SponsorshipItems = () => {
 
   const openCreate = () => {
     setEditingItem(null);
+    setDonorCodeManual(false);
     setFormData(emptyForm);
     setSelectedImages([]);
     setImagePreviews([]);
@@ -228,7 +244,7 @@ const SponsorshipItems = () => {
                 className="bg-green-500 hover:bg-green-400 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" />
-                كفالة جديدة
+                كفيل جديد
               </button>
               <button
                 onClick={fetchItems}
@@ -374,19 +390,63 @@ const SponsorshipItems = () => {
               {/* Name */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">اسم الكفالة / المشروع *</label>
-                <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => {
+                    const newName = e.target.value;
+                    setFormData(prev => ({
+                      ...prev,
+                      name: newName,
+                      donor_code: donorCodeManual
+                        ? prev.donor_code
+                        : generateDonorCode(newName, items, editingItem?.id),
+                    }));
+                  }}
                   placeholder="اسم الكفالة" required
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 />
               </div>
 
-              {/* Donor Code */}
+              {/* Donor Code - auto-generated */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">كود المتبرع (اختياري)</label>
-                <input type="text" value={formData.donor_code} onChange={(e) => setFormData({ ...formData, donor_code: e.target.value })}
-                  placeholder="كود المتبرع"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium text-gray-700">كود المتبرع (مباشر)</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDonorCodeManual(!donorCodeManual);
+                      if (donorCodeManual === false) {
+                        // switching to manual - keep current value
+                      } else {
+                        // switching back to auto - regenerate
+                        setFormData(prev => ({
+                          ...prev,
+                          donor_code: generateDonorCode(prev.name, items, editingItem?.id)
+                        }));
+                      }
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 underline"
+                  >
+                    {donorCodeManual ? 'إعادة التوليد التلقائي' : 'تعديل يدوي'}
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={formData.donor_code}
+                  onChange={(e) => {
+                    if (donorCodeManual) setFormData({ ...formData, donor_code: e.target.value });
+                  }}
+                  readOnly={!donorCodeManual}
+                  placeholder={formData.name ? generateDonorCode(formData.name, items, editingItem?.id) : 'سيتم توليده تلقائياً بعد كتابة الاسم'}
+                  className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono text-sm ${donorCodeManual
+                      ? 'border-blue-300 bg-white'
+                      : 'border-gray-200 bg-gray-50 text-gray-500 cursor-default'
+                    }`}
                 />
+                {!donorCodeManual && (
+                  <p className="text-xs text-gray-400 mt-1">يتم توليد الكود تلقائياً من اسم الكفالة</p>
+                )}
               </div>
 
               {/* Orphans Count */}
@@ -475,7 +535,7 @@ const SponsorshipItems = () => {
                       </span>
                     </label>
                   </div>
-                
+
                   {/* Previews */}
                   {imagePreviews.length > 0 && (
                     <div>

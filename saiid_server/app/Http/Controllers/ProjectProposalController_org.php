@@ -73,6 +73,7 @@ class ProjectProposalController extends Controller
     private const ROLE_MEDIA_MANAGER = 'media_manager';
     private const ROLE_EXECUTED_PROJECTS_COORDINATOR = 'executed_projects_coordinator';
     private const ROLE_ORPHAN_SPONSOR_COORDINATOR = 'orphan_sponsor_coordinator';
+    private const ROLE_ORPHAN_COORDINATOR_ALIAS = 'orphan_coordinator';
 
     // Phase Type Constants
     private const PHASE_TYPE_DAILY = 'daily';
@@ -142,8 +143,25 @@ class ProjectProposalController extends Controller
         if (!$user) {
             return false;
         }
-        $userRole = strtolower($user->role ?? '');
-        return in_array($userRole, array_map('strtolower', $allowedRoles));
+        $userRole = strtolower(trim((string) ($user->role ?? '')));
+        $normalizedAllowedRoles = array_map(
+            static fn($role) => strtolower(trim((string) $role)),
+            $allowedRoles
+        );
+
+        if (in_array($userRole, $normalizedAllowedRoles, true)) {
+            return true;
+        }
+
+        // ✅ Treat orphan_coordinator as alias of orphan_sponsor_coordinator
+        if (
+            $userRole === self::ROLE_ORPHAN_COORDINATOR_ALIAS &&
+            in_array(self::ROLE_ORPHAN_SPONSOR_COORDINATOR, $normalizedAllowedRoles, true)
+        ) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -154,7 +172,27 @@ class ProjectProposalController extends Controller
      */
     private function getUserRole(?User $user): string
     {
-        return strtolower($user->role ?? 'guest');
+        $role = strtolower(trim((string) ($user->role ?? 'guest')));
+        if ($role === self::ROLE_ORPHAN_COORDINATOR_ALIAS) {
+            return self::ROLE_ORPHAN_SPONSOR_COORDINATOR;
+        }
+        return $role;
+    }
+
+    /**
+     * Check if user role is orphan sponsor coordinator (with aliases)
+     */
+    private function isOrphanSponsorCoordinator(?User $user): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        $role = strtolower(trim((string) ($user->role ?? '')));
+        return in_array($role, [
+            self::ROLE_ORPHAN_SPONSOR_COORDINATOR,
+            self::ROLE_ORPHAN_COORDINATOR_ALIAS,
+        ], true);
     }
 
     /**
@@ -1328,7 +1366,7 @@ class ProjectProposalController extends Controller
         // ✅ التحقق من الصلاحيات: Admin أو منسق الكفالة (لمشاريع الكفالات فقط)
         $project = ProjectProposal::findOrFail($id);
         $isSponsorshipProject = $project->isSponsorshipProject();
-        $isOrphanSponsorCoordinator = $userRole === self::ROLE_ORPHAN_SPONSOR_COORDINATOR;
+        $isOrphanSponsorCoordinator = $this->isOrphanSponsorCoordinator($user);
 
         // منسق الكفالة يمكنه تحديث مشاريع الكفالات فقط
         if ($isOrphanSponsorCoordinator && !$isSponsorshipProject) {
@@ -1845,7 +1883,7 @@ class ProjectProposalController extends Controller
 
         // ✅ لمشاريع الكفالة: assigned_researcher_id اختياري (الباحث افتراضياً هو منسق الكفالة)
         $isSponsorshipProject = $project->isSponsorshipProject();
-        $isOrphanSponsorCoordinator = $user->role === self::ROLE_ORPHAN_SPONSOR_COORDINATOR;
+        $isOrphanSponsorCoordinator = $this->isOrphanSponsorCoordinator($user);
 
         $validationRules = [];
         $validationMessages = [];
@@ -2713,7 +2751,7 @@ class ProjectProposalController extends Controller
             }
 
             // يمكن التحويل: "جديد" أو "قيد التوريد" للجميع، أو أي حالة ما عدا "ملغى" لمنسق الكفالات في مشاريع الكفالات
-            $isOrphanSponsorCoordinator = $user->role === 'orphan_sponsor_coordinator';
+            $isOrphanSponsorCoordinator = $this->isOrphanSponsorCoordinator($user);
             $isSponsorshipProject = $project->isSponsorshipProject();
 
             if ($isOrphanSponsorCoordinator && $isSponsorshipProject) {
@@ -3645,7 +3683,7 @@ class ProjectProposalController extends Controller
     public function updateExecutionStatus(Request $request, $id)
     {
         $user = $request->user();
-        $isOrphanSponsorCoordinator = $user && $user->role === 'orphan_sponsor_coordinator';
+        $isOrphanSponsorCoordinator = $this->isOrphanSponsorCoordinator($user);
 
         // ✅ Validation مختلف حسب الدور
         $allowedStatuses = $isOrphanSponsorCoordinator
@@ -3682,8 +3720,8 @@ class ProjectProposalController extends Controller
 
             // التحقق من الصلاحيات
             // ✅ الصلاحيات: مدير المشاريع، مدير الإعلام، والإدارة، منسق الكفالة
-            $allowedRoles = ['project_manager', 'media_manager', 'admin', 'orphan_sponsor_coordinator'];
-            if (!$user || !in_array($user->role, $allowedRoles)) {
+            $allowedRoles = ['project_manager', 'media_manager', 'admin', 'orphan_sponsor_coordinator', 'orphan_coordinator'];
+            if (!$user || !in_array(strtolower(trim((string) $user->role)), $allowedRoles, true)) {
                 Log::warning('❌ UPDATE_EXECUTION_STATUS_UNAUTHORIZED', [
                     'project_id' => $id,
                     'user_role' => $user->role ?? 'guest'
@@ -3699,7 +3737,7 @@ class ProjectProposalController extends Controller
             $project = ProjectProposal::findOrFail($id);
             $oldStatus = $project->status;
             $newStatus = $request->status;
-            $isOrphanSponsorCoordinator = $user->role === 'orphan_sponsor_coordinator';
+            $isOrphanSponsorCoordinator = $this->isOrphanSponsorCoordinator($user);
 
             // ✅ Logging: قبل التحقق
             Log::info('🟡 UPDATE_EXECUTION_STATUS_BEFORE_CHECK', [
@@ -3822,7 +3860,7 @@ class ProjectProposalController extends Controller
             // تسجيل في Timeline
             $roleName = $user->role === 'media_manager' ? 'مدير الإعلام'
                 : ($user->role === 'project_manager' ? 'مدير المشاريع'
-                    : ($user->role === 'orphan_sponsor_coordinator' ? 'منسق الكفالات'
+                    : ($this->isOrphanSponsorCoordinator($user) ? 'منسق الكفالات'
                         : 'الإدارة'));
             $project->recordStatusChange(
                 $oldStatus,

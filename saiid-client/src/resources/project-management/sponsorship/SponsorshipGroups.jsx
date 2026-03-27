@@ -24,9 +24,12 @@ const SponsorshipGroups = () => {
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectModalGroupId, setProjectModalGroupId] = useState(null);
   const [projectTypes, setProjectTypes] = useState([]);
+  const [projectSubcategories, setProjectSubcategories] = useState([]);
   const [projectFormData, setProjectFormData] = useState({
     estimated_duration_days: '',
     project_type_id: '',
+    subcategory_id: '',
+    sponsorship_item_ids: [],
   });
   const [creatingProject, setCreatingProject] = useState(false);
 
@@ -60,6 +63,35 @@ const SponsorshipGroups = () => {
       console.warn('Could not fetch project types');
     }
   };
+
+  const fetchProjectSubcategories = async (typeId, autoSelect = false) => {
+    try {
+      const res = await apiClient.get(`/project-subcategories/by-type/${typeId}`);
+      if (res.data) {
+        const subs = res.data.data || res.data || [];
+        setProjectSubcategories(subs);
+        if (autoSelect && subs.length > 0) {
+          // Auto-select orphan subcategory ('كفالة أيتام') if found, otherwise first one
+          const orphanSub = subs.find(s =>
+            s.name && (s.name.includes('أيتام') || s.name.includes('يتيم'))
+          );
+          const defaultSub = orphanSub || subs[0];
+          setProjectFormData(prev => ({ ...prev, subcategory_id: String(defaultSub.id) }));
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch subcategories', err);
+    }
+  };
+
+  useEffect(() => {
+    if (projectFormData.project_type_id) {
+      fetchProjectSubcategories(projectFormData.project_type_id, true);
+    } else {
+      setProjectSubcategories([]);
+      setProjectFormData(prev => ({ ...prev, subcategory_id: '' }));
+    }
+  }, [projectFormData.project_type_id]);
 
   const fetchGroupItems = async (groupId) => {
     if (groupItems[groupId] !== undefined) {
@@ -117,9 +149,34 @@ const SponsorshipGroups = () => {
     }
   };
 
-  const openProjectModal = (groupId) => {
+  const fetchItemsQuietly = async (groupId) => {
+    if (groupItems[groupId] !== undefined) return;
+    try {
+      const res = await apiClient.get(`/sponsorship-groups/${groupId}/items`);
+      if (res.data.success) {
+        setGroupItems(prev => ({ ...prev, [groupId]: res.data.data || [] }));
+      }
+    } catch (err) { }
+  };
+
+  const openProjectModal = async (groupId) => {
     setProjectModalGroupId(groupId);
-    setProjectFormData({ estimated_duration_days: '', project_type_id: '' });
+    setProjectFormData({ estimated_duration_days: '', project_type_id: '', subcategory_id: '', sponsorship_item_ids: [] });
+    if (groupItems[groupId] === undefined) {
+      fetchItemsQuietly(groupId);
+    }
+    // Auto-load subcategories for the sponsorship type ('الكفالات')
+    try {
+      const typesRes = await apiClient.get('/project-types');
+      const types = typesRes.data?.data || typesRes.data?.project_types || typesRes.data || [];
+      const sponsorshipType = types.find(t => t.name && t.name.includes('كفالات'));
+      if (sponsorshipType) {
+        setProjectFormData(prev => ({ ...prev, project_type_id: String(sponsorshipType.id) }));
+        // fetchProjectSubcategories will be triggered by the useEffect above
+      }
+    } catch (err) {
+      console.warn('Could not auto-load sponsorship type');
+    }
     setShowProjectModal(true);
   };
 
@@ -127,10 +184,18 @@ const SponsorshipGroups = () => {
     e.preventDefault();
     setCreatingProject(true);
     try {
-      const res = await apiClient.post(`/sponsorship-groups/${projectModalGroupId}/create-as-project`, {
+      const payload = {
         estimated_duration_days: projectFormData.estimated_duration_days ? parseInt(projectFormData.estimated_duration_days) : null,
         project_type_id: projectFormData.project_type_id ? parseInt(projectFormData.project_type_id) : null,
-      });
+      };
+      if (projectFormData.subcategory_id) {
+        payload.subcategory_id = parseInt(projectFormData.subcategory_id);
+      }
+      if (projectFormData.sponsorship_item_ids && projectFormData.sponsorship_item_ids.length > 0) {
+        payload.sponsorship_item_ids = projectFormData.sponsorship_item_ids.map(Number);
+      }
+
+      const res = await apiClient.post(`/sponsorship-groups/${projectModalGroupId}/create-as-project`, payload);
       if (res.data.success) {
         toast.success(res.data.message);
         setShowProjectModal(false);
@@ -483,6 +548,89 @@ const SponsorshipGroups = () => {
                     <option key={pt.id} value={pt.id}>{pt.name}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Subcategory - always visible */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  التفريعة
+                </label>
+                <select
+                  value={projectFormData.subcategory_id}
+                  onChange={(e) => setProjectFormData({ ...projectFormData, subcategory_id: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                >
+                  <option value="">اختر التفريعة (اختياري)</option>
+                  {projectSubcategories.map(cat => (
+                    <option key={cat.id} value={String(cat.id)}>{cat.name}</option>
+                  ))}
+                </select>
+                {projectSubcategories.length === 0 && projectFormData.project_type_id && (
+                  <p className="text-xs text-amber-500 mt-1">جاري تحميل التفريعات...</p>
+                )}
+              </div>
+
+              {/* Sponsorship Items - Multi Checkbox */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700">اختيار الكفالات</label>
+                  <div className="flex gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setProjectFormData(prev => ({ ...prev, sponsorship_item_ids: (groupItems[projectModalGroupId] || []).map(i => String(i.id)) }))}
+                      className="text-blue-600 hover:underline"
+                    >تحديد الكل</button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setProjectFormData(prev => ({ ...prev, sponsorship_item_ids: [] }))}
+                      className="text-red-500 hover:underline"
+                    >إلغاء التحديد</button>
+                  </div>
+                </div>
+                <div className="border border-gray-200 rounded-xl max-h-40 overflow-y-auto divide-y divide-gray-100">
+                  {(groupItems[projectModalGroupId] || []).length === 0 ? (
+                    <p className="text-center text-gray-400 text-sm py-4">جاري تحميل الكفالات...</p>
+                  ) : (
+                    (groupItems[projectModalGroupId] || []).map(item => {
+                      const checked = projectFormData.sponsorship_item_ids.includes(String(item.id));
+                      return (
+                        <label
+                          key={item.id}
+                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${
+                            checked ? 'bg-green-50' : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const id = String(item.id);
+                              setProjectFormData(prev => ({
+                                ...prev,
+                                sponsorship_item_ids: e.target.checked
+                                  ? [...prev.sponsorship_item_ids, id]
+                                  : prev.sponsorship_item_ids.filter(x => x !== id),
+                              }));
+                            }}
+                            className="w-4 h-4 rounded text-green-600 border-gray-300 focus:ring-green-500"
+                          />
+                          <span className="text-sm text-gray-800 flex-1">{item.name}</span>
+                          {item.donor_code && (
+                            <span className="text-xs font-mono text-gray-400">{item.donor_code}</span>
+                          )}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  {
+                    projectFormData.sponsorship_item_ids.length === 0
+                      ? 'إذا لم تختر أي كفالة، سيتم إنشاء مشروع لكل كفالات المجموعة'
+                      : `سيتم إنشاء ${projectFormData.sponsorship_item_ids.length} مشروع`
+                  }
+                </p>
               </div>
 
               <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700">
