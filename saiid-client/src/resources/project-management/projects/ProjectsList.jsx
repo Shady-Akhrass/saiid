@@ -5811,6 +5811,27 @@ const ProjectsList = () => {
         console.debug('[orphan_sponsor_coordinator] countFromApi:', countFromApi, 'countAfterGuard:', countAfterGuard, 'ids (first 20):', (filteredProjects || []).slice(0, 20).map((p) => p?.id).filter((id) => id != null));
       }
 
+      // ✅ فلترة الشهر الحالي للمشاريع الشهرية فقط
+      filteredProjects = filteredProjects.filter((project) => {
+        // المشاريع غير الشهرية تظهر دائماً
+        if (!isMonthlyPhaseProject(project)) return true;
+
+        const monthNum = getMonthNumber(project);
+        if (monthNum === null) return false;
+
+        // استخراج phase_start_date من الأب
+        const parent = project.parent_project ?? project.parentProject ?? null;
+        const phaseStart = parent?.phase_start_date ?? parent?.phaseStartDate ?? null;
+        const currentProjectMonth = getCurrentProjectMonthFromStartDate(phaseStart);
+
+        if (currentProjectMonth !== null) {
+          return monthNum === currentProjectMonth;
+        }
+
+        // fallback: التحقق من month_start_date أو execution_date
+        return isTodayInPhaseMonth(project);
+      });
+
       if (Array.isArray(filters.status) && filters.status.length > 0) {
         filteredProjects = filteredProjects.filter((p) => filters.status.includes(p.status));
       }
@@ -6063,10 +6084,30 @@ const ProjectsList = () => {
     } else if (isAdmin) {
       // ✅ للإدارة: عرض كل ما يرسله الـ API (أصلية + فرعية يومية/شهرية عند بدء إجراء أو تم التوريد وما بعد) دون استبعاد
       filteredProjects = Array.isArray(projects) ? projects : [];
+
       if (import.meta.env.DEV) {
         const subCount = (projects || []).filter(p => (p?.parent_project_id != null || p?.parentProjectId != null) && (p?.is_daily_phase || p?.is_monthly_phase)).length;
         console.log('✅ ProjectsList (Admin): showing all from API (parents + sub-projects):', { total: filteredProjects.length, sub_projects: subCount });
       }
+
+      // ✅ إخفاء المشاريع الشهرية واليومية الفرعية التي لا تزال في حالة "جديد" (لم يتم عليها أي إجراء بعد)
+      filteredProjects = filteredProjects.filter((project) => {
+        if (!project || Array.isArray(project)) return false;
+
+        const isMonthlyPhase = project.is_monthly_phase || project.isMonthlyPhase || false;
+        const isDailyPhase = project.is_daily_phase || project.isDailyPhase || false;
+        const hasParentId =
+          project.parent_project_id != null ||
+          project.parentProjectId != null ||
+          (project.parent_project && project.parent_project.id != null);
+
+        // إذا كان مشروعاً شهرياً أو يومياً فرعياً → أخفه إذا كان في حالة "جديد"
+        if ((isMonthlyPhase || isDailyPhase) && hasParentId) {
+          return project.status !== 'جديد';
+        }
+
+        return true;
+      });
 
       if (import.meta.env.DEV) {
         const totalBefore = projects.length;
@@ -6573,11 +6614,11 @@ const ProjectsList = () => {
       if (project?.phase_day != null || project?.phaseDay != null) {
         badges.push(
           <span key="phase-day" className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-100">
-            اليوم {project.phase_day ?? project.phaseDay}
+            اليوم { project.phase_day ?? project.phaseDay }
           </span>
         );
       }
-      return badges.length > 0 ? <div className="flex flex-wrap gap-2 mt-2">{badges}</div> : null;
+      return badges.length > 0 ? <div className="flex flex-wrap gap-2 mt-2">{ badges }</div> : null;
     }
 
     // ✅ مشروع فرعي شهري (مرحلة شهرية) - يظهر في قائمة الإدارة عند بدء إجراء أو تم التوريد
@@ -6590,11 +6631,11 @@ const ProjectsList = () => {
       if (project?.month_number != null || project?.monthNumber != null) {
         badges.push(
           <span key="month-num" className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
-            الشهر {project.month_number ?? project.monthNumber}
+            الشهر { project.month_number ?? project.monthNumber }
           </span>
         );
       }
-      return badges.length > 0 ? <div className="flex flex-wrap gap-2 mt-2">{badges}</div> : null;
+      return badges.length > 0 ? <div className="flex flex-wrap gap-2 mt-2">{ badges }</div> : null;
     }
 
     if (project?.is_divided_into_phases) {
@@ -6607,20 +6648,20 @@ const ProjectsList = () => {
       if (isMonthly) {
         badges.push(
           <span key="monthly" className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-            {project.total_months || project.parent_project?.total_months || '--'} شهر
+            { project.total_months || project.parent_project?.total_months || '--' } شهر
           </span>
         );
       } else if (project.phase_duration_days || project.parent_project?.phase_duration_days) {
         badges.push(
           <span key="days" className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-            يوم {project.phase_duration_days || project.parent_project?.phase_duration_days}
+            يوم { project.phase_duration_days || project.parent_project?.phase_duration_days }
           </span>
         );
       }
-      return badges.length > 0 ? <div className="flex flex-wrap gap-2 mt-2">{badges}</div> : null;
+      return badges.length > 0 ? <div className="flex flex-wrap gap-2 mt-2">{ badges }</div> : null;
     }
 
-    return badges.length > 0 ? <div className="flex flex-wrap gap-2 mt-2">{badges}</div> : null;
+    return badges.length > 0 ? <div className="flex flex-wrap gap-2 mt-2">{ badges }</div> : null;
   };
 
   const handleOpenShelterModal = (project) => {
@@ -6810,7 +6851,7 @@ const ProjectsList = () => {
           <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300">
             <AlertCircle className="w-3.5 h-3.5" />
             <span>متأخر</span>
-            <span className="font-extrabold">{delayedDays}</span>
+            <span className="font-extrabold">{ delayedDays }</span>
             <span>يوم</span>
           </span>
         ),
@@ -6828,8 +6869,8 @@ const ProjectsList = () => {
           <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
             <AlertCircle className="w-3.5 h-3.5 opacity-70" />
             <span>متبقي</span>
-            <span className="font-extrabold">{remaining}</span>
-            <span>{dayText}</span>
+            <span className="font-extrabold">{ remaining }</span>
+            <span>{ dayText }</span>
           </span>
         ),
         isOverdue: false,
@@ -6850,10 +6891,10 @@ const ProjectsList = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/20 p-4 relative" style={{ fontFamily: 'Cairo, Tajawal, Arial, sans-serif', fontWeight: 400 }}>
-      <PageLoader isLoading={loading} />
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/20 p-4 relative" style={ { fontFamily: 'Cairo, Tajawal, Arial, sans-serif', fontWeight: 400 } }>
+      <PageLoader isLoading={ loading } />
       <div className="max-w-7xl mx-auto space-y-5">
-        {/* Header */}
+        {/* Header */ }
         <div className="bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-600 rounded-2xl p-5 md:p-6 text-white shadow-xl relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-full opacity-10">
             <div className="absolute top-4 right-4 w-24 h-24 bg-white rounded-full blur-3xl"></div>
@@ -6862,81 +6903,81 @@ const ProjectsList = () => {
           <div className="relative">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold mb-2 drop-shadow-lg" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
-                  {isFinishedProjectsPage ? 'المشاريع المنتهية' : 'إدارة المشاريع'}
+                <h1 className="text-2xl md:text-3xl font-bold mb-2 drop-shadow-lg" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
+                  { isFinishedProjectsPage ? 'المشاريع المنتهية' : 'إدارة المشاريع' }
                 </h1>
                 <div className="flex flex-wrap items-center gap-3 text-sky-100">
                   <div className="flex items-center gap-2 bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-lg">
                     <FileText className="w-4 h-4" />
-                    <span className="font-semibold text-sm" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>إجمالي: {visibleProjects.length} مشروع</span>
+                    <span className="font-semibold text-sm" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>إجمالي: { visibleProjects.length } مشروع</span>
                   </div>
-                  {isProjectManager && (
+                  { isProjectManager && (
                     <div className="flex items-center gap-2 bg-purple-500/30 backdrop-blur-md px-3 py-1.5 rounded-lg border border-purple-300/30">
                       <span className="text-xs font-medium">
                         عرض: المشاريع غير المقسمة + اليوم الحالي و 3 أيام قادمة
                       </span>
                     </div>
-                  )}
+                  ) }
                 </div>
-                <p className="text-xs text-sky-200 font-medium mt-2 flex items-center gap-1" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}>
+                <p className="text-xs text-sky-200 font-medium mt-2 flex items-center gap-1" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }>
                   <span>📅</span>
-                  {getTodayLabel()}
+                  { getTodayLabel() }
                 </p>
               </div>
-              {!isOrphanSponsorCoordinator && (
+              { !isOrphanSponsorCoordinator && (
                 <div className="flex gap-2 flex-wrap">
                   <Link
                     to="/project-management/reports"
                     className="bg-white/20 backdrop-blur-md hover:bg-white/30 border-2 border-white/30 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                    style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}
+                    style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }
                   >
                     <FileText className="w-4 h-4" />
                     التقارير
                   </Link>
                   <button
-                    onClick={() => setIsExportFilterModalOpen(true)}
-                    disabled={isDownloading || visibleProjects.length === 0}
+                    onClick={ () => setIsExportFilterModalOpen(true) }
+                    disabled={ isDownloading || visibleProjects.length === 0 }
                     className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition-all duration-300 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transform hover:-translate-y-0.5"
-                    style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}
+                    style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }
                   >
                     <Download className="w-4 h-4" />
-                    {isDownloading ? 'جاري التحميل...' : 'تصدير Excel'}
+                    { isDownloading ? 'جاري التحميل...' : 'تصدير Excel' }
                   </button>
                   <Link
                     to="/project-management/projects/new"
                     className="bg-white text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                    style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}
+                    style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }
                   >
                     <Plus className="w-4 h-4" />
                     إنشاء مشروع جديد
                   </Link>
                 </div>
-              )}
+              ) }
             </div>
           </div>
         </div>
 
-        {/* Search and Filters */}
+        {/* Search and Filters */ }
         <div className="bg-white rounded-3xl p-5 shadow-xl border border-gray-100">
           <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
+            {/* Search */ }
             <div className="flex-1 relative group flex gap-2">
               <div className="flex-1 relative">
                 <Search className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-sky-600 w-5 h-5 transition-colors" />
                 <input
                   type="text"
                   placeholder="بحث في اسم المشروع، الوصف، اسم المتبرع، كود المتبرع، الكود الداخلي... (اضغط Enter)"
-                  value={searchInput}
-                  onChange={handleSearchChange}
-                  onKeyDown={handleSearchSubmit}
+                  value={ searchInput }
+                  onChange={ handleSearchChange }
+                  onKeyDown={ handleSearchSubmit }
                   className="w-full pr-12 pl-4 py-4 border-2 border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-all duration-300 text-gray-800 font-medium placeholder-gray-400"
-                  style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}
+                  style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }
                 />
               </div>
               <button
-                onClick={handleSearchButtonClick}
+                onClick={ handleSearchButtonClick }
                 className="px-6 py-4 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-2xl transition-all duration-300 flex items-center gap-2 shadow-lg hover:shadow-xl"
-                style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}
+                style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }
                 title="بحث"
               >
                 <Search className="w-5 h-5" />
@@ -6944,36 +6985,36 @@ const ProjectsList = () => {
               </button>
             </div>
 
-            {/* Filter Toggle */}
+            {/* Filter Toggle */ }
             <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`bg-gradient-to-r ${showFilters ? 'from-sky-500 to-blue-600 text-white' : 'from-gray-100 to-gray-200 text-gray-700'} hover:shadow-lg px-8 py-4 rounded-2xl font-semibold flex items-center gap-2 transition-all duration-300 transform hover:-translate-y-0.5`}
-              style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}
+              onClick={ () => setShowFilters(!showFilters) }
+              className={ `bg-gradient-to-r ${showFilters ? 'from-sky-500 to-blue-600 text-white' : 'from-gray-100 to-gray-200 text-gray-700'} hover:shadow-lg px-8 py-4 rounded-2xl font-semibold flex items-center gap-2 transition-all duration-300 transform hover:-translate-y-0.5` }
+              style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }
             >
               <Filter className="w-5 h-5" />
-              {showFilters ? 'إخفاء الفلاتر' : 'فلترة'}
+              { showFilters ? 'إخفاء الفلاتر' : 'فلترة' }
             </button>
           </div>
 
-          {/* Filters Panel */}
-          {showFilters && (
+          {/* Filters Panel */ }
+          { showFilters && (
             <div className="pt-5 mt-5 border-t-2 border-gray-200">
-              {/* ✅ آلية عرض الدفعات الشهرية (لمنسق الكفالات فقط) */}
-              {isOrphanSponsorCoordinator && (
+              {/* ✅ آلية عرض الدفعات الشهرية (لمنسق الكفالات فقط) */ }
+              { isOrphanSponsorCoordinator && (
                 <div className="mb-4 rounded-2xl border-2 border-sky-100 bg-sky-50/80 p-4">
                   <button
                     type="button"
-                    onClick={() => setShowMonthlyPhasesHelp(!showMonthlyPhasesHelp)}
+                    onClick={ () => setShowMonthlyPhasesHelp(!showMonthlyPhasesHelp) }
                     className="w-full flex items-center justify-between gap-2 text-right hover:bg-sky-100/50 rounded-xl py-2 px-3 -mx-1 transition-colors"
                   >
-                    <span className="flex items-center gap-2 text-sky-800 font-bold" style={{ fontFamily: 'Cairo, sans-serif' }}>
+                    <span className="flex items-center gap-2 text-sky-800 font-bold" style={ { fontFamily: 'Cairo, sans-serif' } }>
                       <Info className="w-5 h-5 text-sky-600 shrink-0" />
                       آلية عرض الدفعات الشهرية
                     </span>
-                    {showMonthlyPhasesHelp ? <ChevronUp className="w-5 h-5 text-sky-600" /> : <ChevronDown className="w-5 h-5 text-sky-600" />}
+                    { showMonthlyPhasesHelp ? <ChevronUp className="w-5 h-5 text-sky-600" /> : <ChevronDown className="w-5 h-5 text-sky-600" /> }
                   </button>
-                  {showMonthlyPhasesHelp && (
-                    <div className="mt-3 pt-3 border-t border-sky-200 text-sm text-gray-700 space-y-3" style={{ fontFamily: 'Cairo, sans-serif' }}>
+                  { showMonthlyPhasesHelp && (
+                    <div className="mt-3 pt-3 border-t border-sky-200 text-sm text-gray-700 space-y-3" style={ { fontFamily: 'Cairo, sans-serif' } }>
                       <p className="font-semibold text-sky-900">
                         يعتمد عرض الدفعات على <strong>تاريخ بداية المراحل</strong> للمشروع، وليس على تاريخ إدخال المشروع فقط.
                       </p>
@@ -6986,24 +7027,24 @@ const ProjectsList = () => {
                         مثال: إذا كانت بداية المراحل في <strong>فبراير</strong>، ففي فبراير تظهر <strong>الدفعة الأولى</strong>، وفي مارس <strong>الدفعة الثانية</strong>.
                       </p>
                     </div>
-                  )}
+                  ) }
                 </div>
-              )}
+              ) }
 
               <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {/* ✅ حالة المشروع - اختيار متعدد */}
+                {/* ✅ حالة المشروع - اختيار متعدد */ }
                 <div className="relative">
-                  <label className="block text-sm font-bold text-gray-800 mb-2" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                  <label className="block text-sm font-bold text-gray-800 mb-2" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                     الحالة
                   </label>
                   <div className="relative">
                     <button
                       type="button"
-                      onClick={() => setShowStatusDropdown(!showStatusDropdown)}
+                      onClick={ () => setShowStatusDropdown(!showStatusDropdown) }
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 text-right flex items-center justify-between bg-white hover:border-sky-300 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
                     >
-                      <span className={`${Array.isArray(filters.status) && filters.status.length > 0 ? 'text-sky-600 font-bold' : 'text-gray-600'}`}>
-                        {Array.isArray(filters.status) && filters.status.length > 0
+                      <span className={ `${Array.isArray(filters.status) && filters.status.length > 0 ? 'text-sky-600 font-bold' : 'text-gray-600'}` }>
+                        { Array.isArray(filters.status) && filters.status.length > 0
                           ? `${filters.status.length} محددة`
                           : 'الكل'
                         }
@@ -7011,57 +7052,57 @@ const ProjectsList = () => {
                       <ChevronDown className="w-5 h-5 text-gray-500" />
                     </button>
 
-                    {showStatusDropdown && (
+                    { showStatusDropdown && (
                       <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-xl shadow-lg max-h-60 overflow-y-auto">
                         <div className="p-2">
                           <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={Array.isArray(filters.status) && filters.status.length === 0}
-                              onChange={() => handleFilterChange('status', [])}
+                              checked={ Array.isArray(filters.status) && filters.status.length === 0 }
+                              onChange={ () => handleFilterChange('status', []) }
                               className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
                             />
                             <span className="text-sm text-gray-800 font-semibold">جميع الحالات</span>
                           </label>
-                          {PROJECT_STATUSES.map((status) => (
-                            <label key={status} className="flex items-center gap-2 px-3 py-2 hover:bg-sky-50 rounded-lg cursor-pointer transition-colors">
+                          { PROJECT_STATUSES.map((status) => (
+                            <label key={ status } className="flex items-center gap-2 px-3 py-2 hover:bg-sky-50 rounded-lg cursor-pointer transition-colors">
                               <input
                                 type="checkbox"
-                                checked={Array.isArray(filters.status) && filters.status.includes(status)}
-                                onChange={(e) => {
+                                checked={ Array.isArray(filters.status) && filters.status.includes(status) }
+                                onChange={ (e) => {
                                   const currentStatus = Array.isArray(filters.status) ? filters.status : [];
                                   if (e.target.checked) {
                                     handleFilterChange('status', [...currentStatus, status]);
                                   } else {
                                     handleFilterChange('status', currentStatus.filter(s => s !== status));
                                   }
-                                }}
+                                } }
                                 className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
                               />
-                              <span className="text-sm text-gray-700">{status}</span>
+                              <span className="text-sm text-gray-700">{ status }</span>
                             </label>
-                          ))}
+                          )) }
                         </div>
                       </div>
-                    )}
+                    ) }
                   </div>
                 </div>
 
-                {/* ✅ نوع المشروع - اختيار متعدد */}
-                {!isOrphanSponsorCoordinator && (
+                {/* ✅ نوع المشروع - اختيار متعدد */ }
+                { !isOrphanSponsorCoordinator && (
                   <div className="relative">
-                    <label className="block text-sm font-bold text-gray-800 mb-2" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                    <label className="block text-sm font-bold text-gray-800 mb-2" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                       نوع المشروع
                     </label>
                     <div className="relative">
                       <button
                         type="button"
-                        onClick={() => setShowProjectTypeDropdown(!showProjectTypeDropdown)}
-                        disabled={projectTypesLoading}
+                        onClick={ () => setShowProjectTypeDropdown(!showProjectTypeDropdown) }
+                        disabled={ projectTypesLoading }
                         className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:opacity-50 text-right flex items-center justify-between bg-white hover:border-sky-300 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
                       >
-                        <span className={`${Array.isArray(filters.project_type) && filters.project_type.length > 0 ? 'text-sky-600 font-bold' : 'text-gray-600'}`}>
-                          {Array.isArray(filters.project_type) && filters.project_type.length > 0
+                        <span className={ `${Array.isArray(filters.project_type) && filters.project_type.length > 0 ? 'text-sky-600 font-bold' : 'text-gray-600'}` }>
+                          { Array.isArray(filters.project_type) && filters.project_type.length > 0
                             ? `${filters.project_type.length} محدد`
                             : 'الكل'
                           }
@@ -7069,62 +7110,62 @@ const ProjectsList = () => {
                         <ChevronDown className="w-5 h-5 text-gray-500" />
                       </button>
 
-                      {showProjectTypeDropdown && !projectTypesLoading && (
+                      { showProjectTypeDropdown && !projectTypesLoading && (
                         <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-xl shadow-lg max-h-60 overflow-y-auto">
                           <div className="p-2">
                             <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                               <input
                                 type="checkbox"
-                                checked={Array.isArray(filters.project_type) && filters.project_type.length === 0}
-                                onChange={() => handleFilterChange('project_type', [])}
+                                checked={ Array.isArray(filters.project_type) && filters.project_type.length === 0 }
+                                onChange={ () => handleFilterChange('project_type', []) }
                                 className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
                               />
                               <span className="text-sm text-gray-700 font-medium">الكل</span>
                             </label>
-                            {projectTypes.map((type) => (
-                              <label key={type} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
+                            { projectTypes.map((type) => (
+                              <label key={ type } className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                                 <input
                                   type="checkbox"
-                                  checked={Array.isArray(filters.project_type) && filters.project_type.includes(type)}
-                                  onChange={(e) => {
+                                  checked={ Array.isArray(filters.project_type) && filters.project_type.includes(type) }
+                                  onChange={ (e) => {
                                     const currentTypes = Array.isArray(filters.project_type) ? filters.project_type : [];
                                     const newTypes = e.target.checked
                                       ? [...currentTypes, type]
                                       : currentTypes.filter(t => t !== type);
                                     handleFilterChange('project_type', newTypes);
-                                  }}
+                                  } }
                                   className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
                                 />
-                                <span className="text-sm text-gray-700">{type}</span>
+                                <span className="text-sm text-gray-700">{ type }</span>
                               </label>
-                            ))}
+                            )) }
                           </div>
                         </div>
-                      )}
+                      ) }
                     </div>
                   </div>
-                )}
+                ) }
 
-                {/* ✅ التفريعة - اختيار متعدد */}
-                {!isOrphanSponsorCoordinator && (
+                {/* ✅ التفريعة - اختيار متعدد */ }
+                { !isOrphanSponsorCoordinator && (
                   <div className="relative">
                     <label className="block text-sm font-bold text-gray-800 mb-2">
                       التفريعة
-                      {filters.project_type.length > 0 && (
+                      { filters.project_type.length > 0 && (
                         <span className="text-xs font-normal text-gray-500 mr-2">
-                          ({filteredSubcategories.length} متاحة)
+                          ({ filteredSubcategories.length } متاحة)
                         </span>
-                      )}
+                      ) }
                     </label>
                     <div className="relative">
                       <button
                         type="button"
-                        onClick={() => setShowSubcategoryDropdown(!showSubcategoryDropdown)}
-                        disabled={subcategoriesLoading}
+                        onClick={ () => setShowSubcategoryDropdown(!showSubcategoryDropdown) }
+                        disabled={ subcategoriesLoading }
                         className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:opacity-50 text-right flex items-center justify-between bg-white hover:border-sky-300 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
                       >
-                        <span className={`${Array.isArray(filters.subcategory_id) && filters.subcategory_id.length > 0 ? 'text-sky-600 font-bold' : 'text-gray-600'}`}>
-                          {Array.isArray(filters.subcategory_id) && filters.subcategory_id.length > 0
+                        <span className={ `${Array.isArray(filters.subcategory_id) && filters.subcategory_id.length > 0 ? 'text-sky-600 font-bold' : 'text-gray-600'}` }>
+                          { Array.isArray(filters.subcategory_id) && filters.subcategory_id.length > 0
                             ? `${filters.subcategory_id.length} محدد`
                             : 'الكل'
                           }
@@ -7132,140 +7173,140 @@ const ProjectsList = () => {
                         <ChevronDown className="w-5 h-5 text-gray-500" />
                       </button>
 
-                      {showSubcategoryDropdown && !subcategoriesLoading && (
+                      { showSubcategoryDropdown && !subcategoriesLoading && (
                         <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-xl shadow-lg max-h-60 overflow-y-auto">
                           <div className="p-2">
                             <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                               <input
                                 type="checkbox"
-                                checked={Array.isArray(filters.subcategory_id) && filters.subcategory_id.length === 0}
-                                onChange={() => handleFilterChange('subcategory_id', [])}
+                                checked={ Array.isArray(filters.subcategory_id) && filters.subcategory_id.length === 0 }
+                                onChange={ () => handleFilterChange('subcategory_id', []) }
                                 className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
                               />
                               <span className="text-sm text-gray-700 font-medium">الكل</span>
                             </label>
-                            {filteredSubcategories.length === 0 && filters.project_type.length > 0 ? (
+                            { filteredSubcategories.length === 0 && filters.project_type.length > 0 ? (
                               <div className="px-3 py-2 text-sm text-gray-500 text-center">
                                 لا توجد تفريعات لنوع المشروع المختار
                               </div>
                             ) : (
                               filteredSubcategories.map((subcategory) => (
-                                <label key={subcategory.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
+                                <label key={ subcategory.id } className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                                   <input
                                     type="checkbox"
-                                    checked={Array.isArray(filters.subcategory_id) && filters.subcategory_id.includes(String(subcategory.id))}
-                                    onChange={(e) => {
+                                    checked={ Array.isArray(filters.subcategory_id) && filters.subcategory_id.includes(String(subcategory.id)) }
+                                    onChange={ (e) => {
                                       const currentIds = Array.isArray(filters.subcategory_id) ? filters.subcategory_id : [];
                                       const subcatId = String(subcategory.id);
                                       const newIds = e.target.checked
                                         ? [...currentIds, subcatId]
                                         : currentIds.filter(id => id !== subcatId);
                                       handleFilterChange('subcategory_id', newIds);
-                                    }}
+                                    } }
                                     className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
                                   />
                                   <span className="text-sm text-gray-700">
-                                    {subcategory.name_ar || subcategory.name || `التفريعة ${subcategory.id}`}
-                                    {subcategory.project_type && (
-                                      <span className="text-xs text-gray-400 mr-1">({subcategory.project_type})</span>
-                                    )}
+                                    { subcategory.name_ar || subcategory.name || `التفريعة ${subcategory.id}` }
+                                    { subcategory.project_type && (
+                                      <span className="text-xs text-gray-400 mr-1">({ subcategory.project_type })</span>
+                                    ) }
                                   </span>
                                 </label>
                               ))
-                            )}
+                            ) }
                           </div>
                         </div>
-                      )}
+                      ) }
                     </div>
                   </div>
-                )}
+                ) }
 
-                {!isOrphanSponsorCoordinator && (
+                { !isOrphanSponsorCoordinator && (
                   <div>
-                    <label className="block text-sm font-bold text-gray-800 mb-2" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                    <label className="block text-sm font-bold text-gray-800 mb-2" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                       الباحث
                     </label>
                     <select
-                      value={filters.researcher_id}
-                      onChange={(e) => handleFilterChange('researcher_id', e.target.value)}
-                      disabled={loadingFilterLists}
+                      value={ filters.researcher_id }
+                      onChange={ (e) => handleFilterChange('researcher_id', e.target.value) }
+                      disabled={ loadingFilterLists }
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:opacity-50 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
-                      style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}
+                      style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }
                     >
                       <option value="">الكل</option>
-                      {researchers.map((researcher) => (
-                        <option key={researcher.id} value={researcher.id}>
-                          {researcher.name || researcher.email || `الباحث ${researcher.id}`}
+                      { researchers.map((researcher) => (
+                        <option key={ researcher.id } value={ researcher.id }>
+                          { researcher.name || researcher.email || `الباحث ${researcher.id}` }
                         </option>
-                      ))}
+                      )) }
                     </select>
                   </div>
-                )}
+                ) }
 
                 <div>
-                  <label className="block text-sm font-bold text-gray-800 mb-2" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                  <label className="block text-sm font-bold text-gray-800 mb-2" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                     المصور
                   </label>
                   <select
-                    value={filters.photographer_id}
-                    onChange={(e) => handleFilterChange('photographer_id', e.target.value)}
-                    disabled={loadingFilterLists}
+                    value={ filters.photographer_id }
+                    onChange={ (e) => handleFilterChange('photographer_id', e.target.value) }
+                    disabled={ loadingFilterLists }
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:opacity-50 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
-                    style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}
+                    style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }
                   >
                     <option value="">الكل</option>
-                    {photographers.map((photographer) => (
-                      <option key={photographer.id} value={photographer.id}>
-                        {photographer.name || photographer.email || `المصور ${photographer.id}`}
+                    { photographers.map((photographer) => (
+                      <option key={ photographer.id } value={ photographer.id }>
+                        { photographer.name || photographer.email || `المصور ${photographer.id}` }
                       </option>
-                    ))}
+                    )) }
                   </select>
                 </div>
 
-                {/* ✅ فلتر الممنتج (لدور الإعلام فقط) */}
-                {isMediaManager && (
+                {/* ✅ فلتر الممنتج (لدور الإعلام فقط) */ }
+                { isMediaManager && (
                   <div>
-                    <label className="block text-sm font-bold text-gray-800 mb-2" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                    <label className="block text-sm font-bold text-gray-800 mb-2" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                       الممنتج
                     </label>
                     <select
-                      value={filters.producer_id}
-                      onChange={(e) => handleFilterChange('producer_id', e.target.value)}
-                      disabled={loadingFilterLists}
+                      value={ filters.producer_id }
+                      onChange={ (e) => handleFilterChange('producer_id', e.target.value) }
+                      disabled={ loadingFilterLists }
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:opacity-50 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
                     >
                       <option value="">الكل</option>
-                      {producers.map((producer) => (
-                        <option key={producer.id} value={producer.id}>
-                          {producer.name || producer.email || `الممنتج ${producer.id}`}
+                      { producers.map((producer) => (
+                        <option key={ producer.id } value={ producer.id }>
+                          { producer.name || producer.email || `الممنتج ${producer.id}` }
                         </option>
-                      ))}
+                      )) }
                     </select>
                   </div>
-                )}
+                ) }
 
-                {/* ✅ فلتر الشهر: لا يُعرض لمنسق الكفالة — الـ Backend مصدر الحقيقة، ولا نطبّق فلترة شهر في الفرونت */}
-                {!isOrphanSponsorCoordinator && (
+                {/* ✅ فلتر الشهر: لا يُعرض لمنسق الكفالة — الـ Backend مصدر الحقيقة، ولا نطبّق فلترة شهر في الفرونت */ }
+                { !isOrphanSponsorCoordinator && (
                   <div>
                     <label className="block text-sm font-bold text-gray-800 mb-2">
                       الشهر
                     </label>
                     <select
-                      value={filters.month_number}
-                      onChange={(e) => handleFilterChange('month_number', e.target.value)}
+                      value={ filters.month_number }
+                      onChange={ (e) => handleFilterChange('month_number', e.target.value) }
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
                     >
                       <option value="">الكل</option>
-                      {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
-                        <option key={month} value={month}>
-                          الشهر {month}
+                      { Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+                        <option key={ month } value={ month }>
+                          الشهر { month }
                         </option>
-                      ))}
+                      )) }
                     </select>
                   </div>
-                )}
+                ) }
 
-                {!isOrphanSponsorCoordinator && (
+                { !isOrphanSponsorCoordinator && (
                   <div>
                     <label className="block text-sm font-bold text-gray-800 mb-2">
                       رقم اليوم (للمشاريع اليومية)
@@ -7273,119 +7314,119 @@ const ProjectsList = () => {
                     <input
                       type="number"
                       min="1"
-                      value={filters.phase_day}
-                      onChange={(e) => handleFilterChange('phase_day', e.target.value)}
+                      value={ filters.phase_day }
+                      onChange={ (e) => handleFilterChange('phase_day', e.target.value) }
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
                       placeholder="مثال: 5"
                     />
                   </div>
-                )}
+                ) }
 
-                {!isOrphanSponsorCoordinator && (
+                { !isOrphanSponsorCoordinator && (
                   <div>
                     <label className="block text-sm font-bold text-gray-800 mb-2">
                       المشروع الأصلي
                     </label>
                     <select
-                      value={filters.parent_project_id}
-                      onChange={(e) => handleFilterChange('parent_project_id', e.target.value)}
+                      value={ filters.parent_project_id }
+                      onChange={ (e) => handleFilterChange('parent_project_id', e.target.value) }
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-all shadow-sm hover:shadow-md font-medium text-gray-700"
                     >
                       <option value="">الكل</option>
-                      {parentProjectOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
+                      { parentProjectOptions.map((option) => (
+                        <option key={ option.id } value={ option.id }>
+                          { option.label }
                         </option>
-                      ))}
+                      )) }
                     </select>
                   </div>
-                )}
+                ) }
 
-                {/* ✅ فلتر المشاريع المتأخرة - مخفي عن منسق الكفالات */}
-                {!isOrphanSponsorCoordinator && (
+                {/* ✅ فلتر المشاريع المتأخرة - مخفي عن منسق الكفالات */ }
+                { !isOrphanSponsorCoordinator && (
                   <div className="flex items-center">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <div className="relative">
                         <input
                           type="checkbox"
-                          checked={filters.show_delayed_only}
-                          onChange={(e) => handleFilterChange('show_delayed_only', e.target.checked)}
+                          checked={ filters.show_delayed_only }
+                          onChange={ (e) => handleFilterChange('show_delayed_only', e.target.checked) }
                           className="sr-only peer"
                         />
                         <div className="w-14 h-7 bg-gray-300 rounded-full peer-checked:bg-gradient-to-r peer-checked:from-red-500 peer-checked:to-orange-500 transition-all duration-300 shadow-inner"></div>
                         <div className="absolute right-0.5 top-0.5 bg-white w-6 h-6 rounded-full transition-transform duration-300 peer-checked:translate-x-[-28px] shadow-md"></div>
                       </div>
-                      <span className="text-sm font-bold text-gray-800 group-hover:text-red-600 transition-colors" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                      <span className="text-sm font-bold text-gray-800 group-hover:text-red-600 transition-colors" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                         المشاريع المتأخرة فقط
                       </span>
                     </label>
                   </div>
-                )}
+                ) }
 
-                {/* ✅ فلتر المشاريع العاجلة */}
+                {/* ✅ فلتر المشاريع العاجلة */ }
                 <div className="flex items-center">
                   <label className="flex items-center gap-3 cursor-pointer group">
                     <div className="relative">
                       <input
                         type="checkbox"
-                        checked={filters.show_urgent_only}
-                        onChange={(e) => handleFilterChange('show_urgent_only', e.target.checked)}
+                        checked={ filters.show_urgent_only }
+                        onChange={ (e) => handleFilterChange('show_urgent_only', e.target.checked) }
                         className="sr-only peer"
                       />
                       <div className="w-14 h-7 bg-gray-300 rounded-full peer-checked:bg-gradient-to-r peer-checked:from-amber-500 peer-checked:to-yellow-500 transition-all duration-300 shadow-inner"></div>
                       <div className="absolute right-0.5 top-0.5 bg-white w-6 h-6 rounded-full transition-transform duration-300 peer-checked:translate-x-[-28px] shadow-md"></div>
                     </div>
-                    <span className="text-sm font-bold text-gray-800 group-hover:text-amber-600 transition-colors" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                    <span className="text-sm font-bold text-gray-800 group-hover:text-amber-600 transition-colors" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                       المشاريع العاجلة فقط
                     </span>
                   </label>
                 </div>
 
-                {/* ✅ فلتر: المشاريع الفرعية فقط (لمدير المشاريع) */}
-                {isProjectManager && (
+                {/* ✅ فلتر: المشاريع الفرعية فقط (لمدير المشاريع) */ }
+                { isProjectManager && (
                   <div className="flex items-center">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <div className="relative">
                         <input
                           type="checkbox"
-                          checked={filters.show_sub_projects_only}
-                          onChange={(e) => handleFilterChange('show_sub_projects_only', e.target.checked)}
+                          checked={ filters.show_sub_projects_only }
+                          onChange={ (e) => handleFilterChange('show_sub_projects_only', e.target.checked) }
                           className="sr-only peer"
                         />
                         <div className="w-14 h-7 bg-gray-300 rounded-full peer-checked:bg-gradient-to-r peer-checked:from-purple-500 peer-checked:to-indigo-600 transition-all duration-300 shadow-inner"></div>
                         <div className="absolute right-0.5 top-0.5 bg-white w-6 h-6 rounded-full transition-transform duration-300 peer-checked:translate-x-[-28px] shadow-md"></div>
                       </div>
-                      <span className="text-sm font-bold text-gray-800 group-hover:text-purple-600 transition-colors" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                      <span className="text-sm font-bold text-gray-800 group-hover:text-purple-600 transition-colors" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                         المشاريع الفرعية فقط
                       </span>
                     </label>
                   </div>
-                )}
+                ) }
 
-                {/* ✅ فلتر المشاريع الأصلية المقسمة فقط (للإدارة) */}
-                {isAdmin && (
+                {/* ✅ فلتر المشاريع الأصلية المقسمة فقط (للإدارة) */ }
+                { isAdmin && (
                   <div className="flex items-center">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <div className="relative">
                         <input
                           type="checkbox"
-                          checked={filters.show_divided_parents_only}
-                          onChange={(e) => handleFilterChange('show_divided_parents_only', e.target.checked)}
+                          checked={ filters.show_divided_parents_only }
+                          onChange={ (e) => handleFilterChange('show_divided_parents_only', e.target.checked) }
                           className="sr-only peer"
                         />
                         <div className="w-14 h-7 bg-gray-300 rounded-full peer-checked:bg-gradient-to-r peer-checked:from-sky-500 peer-checked:to-blue-600 transition-all duration-300 shadow-inner"></div>
                         <div className="absolute right-0.5 top-0.5 bg-white w-6 h-6 rounded-full transition-transform duration-300 peer-checked:translate-x-[-28px] shadow-md"></div>
                       </div>
-                      <span className="text-sm font-bold text-gray-800 group-hover:text-sky-600 transition-colors" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                      <span className="text-sm font-bold text-gray-800 group-hover:text-sky-600 transition-colors" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                         المشاريع الأصلية المقسمة فقط
                       </span>
                     </label>
                   </div>
-                )}
+                ) }
 
                 <div className="flex items-end">
                   <button
-                    onClick={clearFilters}
+                    onClick={ clearFilters }
                     className="w-full bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-4 py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-0.5"
                   >
                     <X className="w-5 h-5" />
@@ -7394,11 +7435,11 @@ const ProjectsList = () => {
                 </div>
               </div>
             </div>
-          )}
+          ) }
         </div>
 
-        {/* Execution Alerts for Coordinators */}
-        {isExecutedCoordinator && (
+        {/* Execution Alerts for Coordinators */ }
+        { isExecutedCoordinator && (
           <div className="bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 rounded-2xl p-6 shadow-xl border-2 border-amber-200 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-4">
@@ -7410,30 +7451,30 @@ const ProjectsList = () => {
                     <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-amber-500 text-white">
                       تنبيه مهم
                     </span>
-                    {readyForExecutionProjects.length > 0 && (
+                    { readyForExecutionProjects.length > 0 && (
                       <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-500 text-white text-xs font-bold">
-                        {readyForExecutionProjects.length}
+                        { readyForExecutionProjects.length }
                       </span>
-                    )}
+                    ) }
                   </div>
-                  <h2 className="text-2xl font-bold text-gray-800 mb-1 flex items-center gap-3" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                  <h2 className="text-2xl font-bold text-gray-800 mb-1 flex items-center gap-3" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                     <span>مشاريع جاهزة للتنفيذ</span>
-                    {readyForExecutionProjects.length > 0 && (
+                    { readyForExecutionProjects.length > 0 && (
                       <span className="inline-flex items-center justify-center min-w-[2.5rem] h-10 px-3 rounded-full bg-red-500 text-white text-lg font-bold shadow-lg">
-                        {readyForExecutionProjects.length}
+                        { readyForExecutionProjects.length }
                       </span>
-                    )}
+                    ) }
                   </h2>
                   <p className="text-gray-600 text-sm">
-                    {readyForExecutionProjects.length > 0
+                    { readyForExecutionProjects.length > 0
                       ? `تم توزيع ${readyForExecutionProjects.length} مشروع من قبل مدير المشاريع على الفرق وهي بانتظار اختيار المخيم والبدء بالتنفيذ.`
-                      : 'لا توجد مشاريع جاهزة للتنفيذ حالياً. سيتم إشعارك عند توزيع مشاريع جديدة من قبل مدير المشاريع.'}
+                      : 'لا توجد مشاريع جاهزة للتنفيذ حالياً. سيتم إشعارك عند توزيع مشاريع جديدة من قبل مدير المشاريع.' }
                   </p>
                 </div>
               </div>
             </div>
 
-            {readyForExecutionProjects.length > 0 && (
+            { readyForExecutionProjects.length > 0 && (
               <>
                 <div className="bg-white rounded-xl p-4 border border-amber-200">
                   <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -7441,7 +7482,7 @@ const ProjectsList = () => {
                     قائمة المشاريع الموزعة
                   </h3>
                   <div className="space-y-3">
-                    {readyForExecutionProjects.map((project) => {
+                    { readyForExecutionProjects.map((project) => {
                       const teamName = project?.assigned_to_team?.team_name ||
                         project?.assigned_team?.team_name ||
                         project?.team_name ||
@@ -7452,79 +7493,79 @@ const ProjectsList = () => {
 
                       return (
                         <div
-                          key={project.id}
+                          key={ project.id }
                           className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border-2 border-amber-200 bg-gradient-to-r from-white to-amber-50 hover:shadow-md transition-shadow"
                         >
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
-                              {(project?.donor_code || project?.internal_code) ? (
+                              { (project?.donor_code || project?.internal_code) ? (
                                 <span className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-bold bg-amber-100 text-amber-700 border border-amber-300">
-                                  كود المشروع: {getProjectCode(project, '---')}
+                                  كود المشروع: { getProjectCode(project, '---') }
                                 </span>
-                              ) : null}
+                              ) : null }
                               <span className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-medium bg-sky-100 text-sky-700">
-                                {(() => {
+                                { (() => {
                                   if (!project.project_type) return '---';
                                   if (typeof project.project_type === 'object' && project.project_type !== null) {
                                     return project.project_type.name_ar || project.project_type.name || project.project_type.name_en || '---';
                                   }
                                   return project.project_type;
-                                })()}
+                                })() }
                               </span>
                             </div>
                             <p className="text-gray-800 font-bold text-lg mb-1">
-                              {project.project_name || project.donor_name || 'مشروع بدون اسم'}
+                              { project.project_name || project.donor_name || 'مشروع بدون اسم' }
                             </p>
                             <p className="text-gray-600 text-sm line-clamp-2 mb-2">
-                              {getProjectDescription(project)}
+                              { getProjectDescription(project) }
                             </p>
                             <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                               <span className="flex items-center gap-1">
                                 <Users className="w-3 h-3" />
-                                الفريق: <span className="font-semibold text-gray-700">{teamName}</span>
+                                الفريق: <span className="font-semibold text-gray-700">{ teamName }</span>
                               </span>
                               <span className="flex items-center gap-1">
                                 <Camera className="w-3 h-3" />
-                                المصور: <span className="font-semibold text-gray-700">{photographerName}</span>
+                                المصور: <span className="font-semibold text-gray-700">{ photographerName }</span>
                               </span>
                             </div>
-                            {/* تفاصيل الأصناف */}
-                            {projectsSupplyData[project.id]?.items_count > 0 && (
+                            {/* تفاصيل الأصناف */ }
+                            { projectsSupplyData[project.id]?.items_count > 0 && (
                               <div className="mt-3 pt-3 border-t border-amber-200 flex flex-wrap items-center gap-3">
-                                {projectsSupplyData[project.id]?.items_count > 0 && (
+                                { projectsSupplyData[project.id]?.items_count > 0 && (
                                   <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-100 text-blue-800 text-sm font-medium">
                                     <ShoppingCart className="w-4 h-4" />
-                                    <span className="font-bold">{projectsSupplyData[project.id].items_count}</span>
+                                    <span className="font-bold">{ projectsSupplyData[project.id].items_count }</span>
                                     <span>صنف</span>
                                   </span>
-                                )}
-                                {projectsSupplyData[project.id]?.items && projectsSupplyData[project.id].items.length > 0 && (
+                                ) }
+                                { projectsSupplyData[project.id]?.items && projectsSupplyData[project.id].items.length > 0 && (
                                   <div className="flex flex-wrap gap-2 mt-1">
-                                    {projectsSupplyData[project.id].items.slice(0, 3).map((item, idx) => (
+                                    { projectsSupplyData[project.id].items.slice(0, 3).map((item, idx) => (
                                       <span
-                                        key={idx}
+                                        key={ idx }
                                         className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs"
                                       >
-                                        <span>{item.warehouse_item?.name || item.name || 'صنف'}</span>
-                                        {item.quantity_per_unit && (
-                                          <span className="text-gray-500">({item.quantity_per_unit}/طرد)</span>
-                                        )}
+                                        <span>{ item.warehouse_item?.name || item.name || 'صنف' }</span>
+                                        { item.quantity_per_unit && (
+                                          <span className="text-gray-500">({ item.quantity_per_unit }/طرد)</span>
+                                        ) }
                                       </span>
-                                    ))}
-                                    {projectsSupplyData[project.id].items.length > 3 && (
+                                    )) }
+                                    { projectsSupplyData[project.id].items.length > 3 && (
                                       <span className="inline-flex items-center px-2 py-1 rounded bg-gray-100 text-gray-600 text-xs">
-                                        +{projectsSupplyData[project.id].items.length - 3} أكثر
+                                        +{ projectsSupplyData[project.id].items.length - 3 } أكثر
                                       </span>
-                                    )}
+                                    ) }
                                   </div>
-                                )}
+                                ) }
                               </div>
-                            )}
+                            ) }
                           </div>
                           <div className="flex items-center gap-2">
-                            {!(project.shelter_id || project.shelter?.id) ? (
+                            { !(project.shelter_id || project.shelter?.id) ? (
                               <button
-                                onClick={() => handleOpenShelterModal(project)}
+                                onClick={ () => handleOpenShelterModal(project) }
                                 className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-xl text-sm font-bold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
                               >
                                 <Home className="w-4 h-4" />
@@ -7532,15 +7573,15 @@ const ProjectsList = () => {
                               </button>
                             ) : (
                               <button
-                                onClick={() => handleTransferToExecution(project.id)}
+                                onClick={ () => handleTransferToExecution(project.id) }
                                 className="px-5 py-2.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-xl text-sm font-bold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
                               >
                                 <Play className="w-4 h-4" />
                                 نقل للتنفيذ
                               </button>
-                            )}
+                            ) }
                             <Link
-                              to={`/project-management/projects/${project.id}`}
+                              to={ `/project-management/projects/${project.id}` }
                               className="px-4 py-2.5 bg-sky-100 hover:bg-sky-200 text-sky-700 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
                             >
                               <Eye className="w-4 h-4" />
@@ -7549,16 +7590,16 @@ const ProjectsList = () => {
                           </div>
                         </div>
                       );
-                    })}
+                    }) }
                   </div>
                 </div>
               </>
-            )}
+            ) }
           </div>
-        )}
+        ) }
 
-        {/* ✅ قسم المشاريع قيد التنفيذ - للمنسق المنفذ */}
-        {isExecutedCoordinator && inExecutionProjects.length > 0 && (
+        {/* ✅ قسم المشاريع قيد التنفيذ - للمنسق المنفذ */ }
+        { isExecutedCoordinator && inExecutionProjects.length > 0 && (
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 rounded-2xl p-6 shadow-xl border-2 border-blue-200 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-4">
@@ -7571,13 +7612,13 @@ const ProjectsList = () => {
                       قيد التنفيذ
                     </span>
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">
-                      {inExecutionProjects.length}
+                      { inExecutionProjects.length }
                     </span>
                   </div>
-                  <h2 className="text-2xl font-bold text-gray-800 mb-1 flex items-center gap-3" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+                  <h2 className="text-2xl font-bold text-gray-800 mb-1 flex items-center gap-3" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                     <span>مشاريع قيد التنفيذ</span>
                     <span className="inline-flex items-center justify-center min-w-[2.5rem] h-10 px-3 rounded-full bg-blue-600 text-white text-lg font-bold shadow-lg">
-                      {inExecutionProjects.length}
+                      { inExecutionProjects.length }
                     </span>
                   </h2>
                   <p className="text-gray-600 text-sm">
@@ -7588,50 +7629,50 @@ const ProjectsList = () => {
             </div>
 
             <div className="bg-white rounded-xl p-4 border border-blue-200">
-              <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
+              <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
                 <Briefcase className="w-5 h-5 text-blue-600" />
                 قائمة المشاريع قيد التنفيذ
               </h3>
               <div className="space-y-3">
-                {inExecutionProjects.map((project) => {
+                { inExecutionProjects.map((project) => {
                   return (
                     <div
-                      key={project.id}
+                      key={ project.id }
                       className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl hover:from-blue-100 hover:to-indigo-100 transition-all border border-blue-200 hover:border-blue-300 hover:shadow-md"
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           <span className="text-gray-500 text-sm font-medium">
-                            #{project.id}
+                            #{ project.id }
                           </span>
                           <h4 className="font-bold text-gray-800 text-base">
-                            {project.project_name || project.donor_name || 'مشروع بدون اسم'}
+                            { project.project_name || project.donor_name || 'مشروع بدون اسم' }
                           </h4>
                         </div>
                         <div className="flex flex-wrap gap-3 text-sm">
-                          {project.team_name && (
+                          { project.team_name && (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-100 text-purple-800 font-medium">
                               <Users className="w-4 h-4" />
-                              {project.team_name}
+                              { project.team_name }
                             </span>
-                          )}
-                          {project.shelter?.camp_name && (
+                          ) }
+                          { project.shelter?.camp_name && (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-green-100 text-green-800 font-medium">
                               <Home className="w-4 h-4" />
-                              {project.shelter.camp_name}
+                              { project.shelter.camp_name }
                             </span>
-                          )}
-                          {project.execution_date && (
+                          ) }
+                          { project.execution_date && (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-orange-100 text-orange-800 font-medium">
                               <Calendar className="w-4 h-4" />
-                              {new Date(project.execution_date).toLocaleDateString('ar-EG')}
+                              { new Date(project.execution_date).toLocaleDateString('ar-EG') }
                             </span>
-                          )}
+                          ) }
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <Link
-                          to={`/project-management/projects/${project.id}`}
+                          to={ `/project-management/projects/${project.id}` }
                           className="px-4 py-2.5 bg-sky-100 hover:bg-sky-200 text-sky-700 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
                         >
                           <Eye className="w-4 h-4" />
@@ -7640,49 +7681,49 @@ const ProjectsList = () => {
                       </div>
                     </div>
                   );
-                })}
+                }) }
               </div>
             </div>
           </div>
-        )}
+        ) }
 
-        {/* Projects Table */}
+        {/* Projects Table */ }
         <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100">
-          {paginatedProjects.length === 0 && !loading ? (
+          { paginatedProjects.length === 0 && !loading ? (
             <div className="text-center py-20 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl m-4">
               <div className="bg-white w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
                 <FileText className="w-12 h-12 text-gray-400" />
               </div>
-              <p className="text-gray-600 text-xl font-bold mb-3" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>لا توجد مشاريع</p>
-              <div className="text-gray-500 text-sm space-y-1 max-w-2xl mx-auto" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 400 }}>
-                {Array.isArray(filters.status) && filters.status.length > 0 && (
+              <p className="text-gray-600 text-xl font-bold mb-3" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>لا توجد مشاريع</p>
+              <div className="text-gray-500 text-sm space-y-1 max-w-2xl mx-auto" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 400 } }>
+                { Array.isArray(filters.status) && filters.status.length > 0 && (
                   <p className="bg-blue-50 text-blue-700 inline-block px-4 py-2 rounded-lg font-medium mx-1">
-                    الحالات: {filters.status.join(', ')}
+                    الحالات: { filters.status.join(', ') }
                   </p>
-                )}
-                {Array.isArray(filters.project_type) && filters.project_type.length > 0 && (
+                ) }
+                { Array.isArray(filters.project_type) && filters.project_type.length > 0 && (
                   <p className="bg-purple-50 text-purple-700 inline-block px-4 py-2 rounded-lg font-medium mx-1">
-                    الأنواع: {filters.project_type.join(', ')}
+                    الأنواع: { filters.project_type.join(', ') }
                   </p>
-                )}
-                {Array.isArray(filters.subcategory_id) && filters.subcategory_id.length > 0 && (
+                ) }
+                { Array.isArray(filters.subcategory_id) && filters.subcategory_id.length > 0 && (
                   <p className="bg-green-50 text-green-700 inline-block px-4 py-2 rounded-lg font-medium mx-1">
-                    التفريعات: {filters.subcategory_id.length}
+                    التفريعات: { filters.subcategory_id.length }
                   </p>
-                )}
-                {filters.show_delayed_only && (
+                ) }
+                { filters.show_delayed_only && (
                   <p className="bg-red-50 text-red-700 inline-block px-4 py-2 rounded-lg font-medium mx-1">
                     المشاريع المتأخرة فقط
                   </p>
-                )}
-                {filters.searchQuery && (
+                ) }
+                { filters.searchQuery && (
                   <p className="bg-orange-50 text-orange-700 inline-block px-4 py-2 rounded-lg font-medium mx-1">
-                    البحث: {filters.searchQuery}
+                    البحث: { filters.searchQuery }
                   </p>
-                )}
-                {(!Array.isArray(filters.status) || filters.status.length === 0) && (!Array.isArray(filters.project_type) || filters.project_type.length === 0) && (!Array.isArray(filters.subcategory_id) || filters.subcategory_id.length === 0) && !filters.searchQuery && (
+                ) }
+                { (!Array.isArray(filters.status) || filters.status.length === 0) && (!Array.isArray(filters.project_type) || filters.project_type.length === 0) && (!Array.isArray(filters.subcategory_id) || filters.subcategory_id.length === 0) && !filters.searchQuery && (
                   <p className="text-gray-400">لا توجد فلترة نشطة</p>
-                )}
+                ) }
               </div>
             </div>
           ) : (
@@ -7690,91 +7731,91 @@ const ProjectsList = () => {
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b-2 border-gray-200">
-                    {(isAdmin || isMediaManager) ? (
+                    { (isAdmin || isMediaManager) ? (
                       <tr>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>كود المشروع</th>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>الاسم</th>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>اسم المتبرع</th>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>الوصف</th>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>المبلغ قبل الخصم</th>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>المبلغ بعد التحويل</th>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>المبلغ الصافي</th>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>حالة المشروع</th>
-                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>الأيام المتبقية للتنفيذ</th>
-                        <th className="text-center py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 800 }}>الخيارات</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>كود المشروع</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>الاسم</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>اسم المتبرع</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>الوصف</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>المبلغ قبل الخصم</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>المبلغ بعد التحويل</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>المبلغ الصافي</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>حالة المشروع</th>
+                        <th className="text-right py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>الأيام المتبقية للتنفيذ</th>
+                        <th className="text-center py-3 px-3 text-sm font-bold text-gray-800 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 800 } }>الخيارات</th>
                       </tr>
                     ) : isProjectManager ? (
                       <tr>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>كود المشروع</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الاسم</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>اليوم</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>اسم المتبرع</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>التفاصيل</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>المبلغ الصافي للتنفيذ</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>حالة المشروع</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الأيام المتبقية للتنفيذ</th>
-                        <th className="text-center py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الإجراءات</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>كود المشروع</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الاسم</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>اليوم</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>اسم المتبرع</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>التفاصيل</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>المبلغ الصافي للتنفيذ</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>حالة المشروع</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الأيام المتبقية للتنفيذ</th>
+                        <th className="text-center py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الإجراءات</th>
                       </tr>
                     ) : isExecutedCoordinator ? (
                       <tr>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الكود</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الوصف</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الفريق المكلف</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>المصور</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الحالة</th>
-                        <th className="text-center py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الإجراءات</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الكود</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الوصف</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الفريق المكلف</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>المصور</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الحالة</th>
+                        <th className="text-center py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الإجراءات</th>
                       </tr>
                     ) : (
                       <tr>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الكود</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>اسم المشروع</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الوصف</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>اسم المتبرع</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>رقم الشهر</th>
-                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الحالة</th>
-                        {!isOrphanSponsorCoordinator && (
-                          <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>الفريق المكلف</th>
-                        )}
-                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>المصور</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الكود</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>اسم المشروع</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الوصف</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>اسم المتبرع</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>رقم الشهر</th>
+                        <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الحالة</th>
+                        { !isOrphanSponsorCoordinator && (
+                          <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>الفريق المكلف</th>
+                        ) }
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>المصور</th>
                         <th
                           className="text-right py-4 px-6 text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none"
-                          style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}
-                          onClick={() => handleSort('created_at')}
+                          style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }
+                          onClick={ () => handleSort('created_at') }
                         >
                           <div className="flex items-center justify-end gap-2">
                             <span>تاريخ التسجيل</span>
-                            {sortConfig.key === 'created_at' && (
+                            { sortConfig.key === 'created_at' && (
                               sortConfig.direction === 'asc' ? (
                                 <ArrowUp className="w-4 h-4 text-sky-600" />
                               ) : (
                                 <ArrowDown className="w-4 h-4 text-sky-600" />
                               )
-                            )}
+                            ) }
                           </div>
                         </th>
-                        {!isOrphanSponsorCoordinator && (
+                        { !isOrphanSponsorCoordinator && (
                           <th
                             className="text-right py-4 px-6 text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none"
-                            onClick={() => handleSort('updated_at')}
+                            onClick={ () => handleSort('updated_at') }
                           >
                             <div className="flex items-center justify-end gap-2">
                               <span>تاريخ التحديث</span>
-                              {sortConfig.key === 'updated_at' && (
+                              { sortConfig.key === 'updated_at' && (
                                 sortConfig.direction === 'asc' ? (
                                   <ArrowUp className="w-4 h-4 text-sky-600" />
                                 ) : (
                                   <ArrowDown className="w-4 h-4 text-sky-600" />
                                 )
-                              )}
+                              ) }
                             </div>
                           </th>
-                        )}
+                        ) }
                         <th className="text-center py-4 px-6 text-sm font-semibold text-gray-700">الإجراءات</th>
                       </tr>
-                    )}
+                    ) }
                   </thead>
                   <tbody>
-                    {paginatedProjects.map((project) => {
+                    { paginatedProjects.map((project) => {
                       // ✅ التحقق من أن project هو object وليس array
                       if (!project || Array.isArray(project)) {
                         if (import.meta.env.DEV) {
@@ -7838,271 +7879,271 @@ const ProjectsList = () => {
                       }
 
                       return (
-                        <tr key={project.id} className={rowClassName}>
-                          {(isAdmin || isMediaManager) ? (
+                        <tr key={ project.id } className={ rowClassName }>
+                          { (isAdmin || isMediaManager) ? (
                             <>
-                              <td className="py-2 px-3 text-sm font-medium text-gray-800" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}>
-                                <Link to={`/project-management/projects/${project.id}`} className="hover:underline text-sky-600 hover:text-sky-700" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>
-                                  {projectCode}
+                              <td className="py-2 px-3 text-sm font-medium text-gray-800" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }>
+                                <Link to={ `/project-management/projects/${project.id}` } className="hover:underline text-sky-600 hover:text-sky-700" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>
+                                  { projectCode }
                                 </Link>
                               </td>
 
-                              <td className="py-2 px-3 text-sm text-gray-800" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}>
+                              <td className="py-2 px-3 text-sm text-gray-800" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }>
                                 <div className="flex flex-col gap-1">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <span className={getDivisionTextColor(project)} style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}>{projectName}</span>
-                                    {isUrgent && (
+                                    <span className={ getDivisionTextColor(project) } style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }>{ projectName }</span>
+                                    { isUrgent && (
                                       <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-red-600 text-white border-2 border-red-700 shadow-lg animate-pulse ring-2 ring-red-400" title="مشروع عاجل">
                                         <AlertCircle className="w-4 h-4" />
                                         عاجل
                                       </span>
-                                    )}
-                                    {isPostponed && (
+                                    ) }
+                                    { isPostponed && (
                                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-gradient-to-r from-orange-400 to-amber-500 text-white border-2 border-orange-600 shadow-lg animate-pulse">
                                         <Clock className="w-3 h-3" />
                                         مؤجل
                                       </span>
-                                    )}
+                                    ) }
                                   </div>
-                                  {renderProjectBadges(project)}
+                                  { renderProjectBadges(project) }
                                 </div>
                               </td>
-                              <td className="py-2 px-3 text-sm text-gray-800 font-medium" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}>
-                                {project.donor_name || project.donor?.name || '---'}
+                              <td className="py-2 px-3 text-sm text-gray-800 font-medium" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }>
+                                { project.donor_name || project.donor?.name || '---' }
                               </td>
-                              <td className="py-2 px-3 text-sm text-gray-700 max-w-xs" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 400 }}>
-                                <div className="line-clamp-2" title={getProjectDescription(project)}>
-                                  {getProjectDescription(project)}
+                              <td className="py-2 px-3 text-sm text-gray-700 max-w-xs" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 400 } }>
+                                <div className="line-clamp-2" title={ getProjectDescription(project) }>
+                                  { getProjectDescription(project) }
                                 </div>
-                                {renderProjectBadges(project)}
-                                {(project.is_daily_phase || project.is_monthly_phase) && getSubProjectParentName(project) && (
+                                { renderProjectBadges(project) }
+                                { (project.is_daily_phase || project.is_monthly_phase) && getSubProjectParentName(project) && (
                                   <span className="text-xs text-gray-500 mt-1 block">
-                                    من: {getSubProjectParentName(project)}
-                                    {(project.is_monthly_phase || project.isMonthlyPhase) && (project.month_number != null || project.monthNumber != null) && (
+                                    من: { getSubProjectParentName(project) }
+                                    { (project.is_monthly_phase || project.isMonthlyPhase) && (project.month_number != null || project.monthNumber != null) && (
                                       <span className="text-purple-600 font-semibold">
-                                        {isOrphanSponsorCoordinator
+                                        { isOrphanSponsorCoordinator
                                           ? ` - ${getDisplayMonthNameForProject(project) || `الشهر ${project.month_number ?? project.monthNumber}`}`
                                           : ` - الشهر ${project.month_number ?? project.monthNumber}`
                                         }
                                       </span>
-                                    )}
-                                    {(project.is_daily_phase || project.isDailyPhase) && (project.phase_day != null || project.phaseDay != null) && (
-                                      <span className="text-blue-600 font-semibold"> - اليوم {project.phase_day ?? project.phaseDay}</span>
-                                    )}
+                                    ) }
+                                    { (project.is_daily_phase || project.isDailyPhase) && (project.phase_day != null || project.phaseDay != null) && (
+                                      <span className="text-blue-600 font-semibold"> - اليوم { project.phase_day ?? project.phaseDay }</span>
+                                    ) }
                                   </span>
-                                )}
+                                ) }
                               </td>
-                              <td className="py-2 px-3 text-sm font-medium text-gray-800" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>
-                                {formatOriginalAmount(project, currencyCode)}
+                              <td className="py-2 px-3 text-sm font-medium text-gray-800" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>
+                                { formatOriginalAmount(project, currencyCode) }
                               </td>
-                              <td className="py-2 px-3 text-sm font-medium text-gray-800" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>
-                                {formatCurrency(amountAfter || 0)}
+                              <td className="py-2 px-3 text-sm font-medium text-gray-800" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>
+                                { formatCurrency(amountAfter || 0) }
                               </td>
-                              <td className="py-2 px-3 text-sm font-medium text-green-600" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
-                                {formatCurrency(netAmount || 0)}
+                              <td className="py-2 px-3 text-sm font-medium text-green-600" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
+                                { formatCurrency(netAmount || 0) }
                               </td>
                               <td className="py-2 px-3">
                                 <span
-                                  onClick={() => handleStatusClick(project)}
-                                  className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${isPostponed ? 'bg-gradient-to-r from-orange-100 to-amber-200 text-orange-800 border-2 border-orange-400 font-bold shadow-md' : `${getStatusColor(project.status)} text-white`} ${project.status === 'وصل للمتبرع' ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                                  style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}
-                                  title={project.status === 'وصل للمتبرع' ? 'انقر للموافقة/الرفض' : ''}
+                                  onClick={ () => handleStatusClick(project) }
+                                  className={ `inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${isPostponed ? 'bg-gradient-to-r from-orange-100 to-amber-200 text-orange-800 border-2 border-orange-400 font-bold shadow-md' : `${getStatusColor(project.status)} text-white`} ${project.status === 'وصل للمتبرع' ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}` }
+                                  style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }
+                                  title={ project.status === 'وصل للمتبرع' ? 'انقر للموافقة/الرفض' : '' }
                                 >
-                                  {isPostponed && (
+                                  { isPostponed && (
                                     <Clock className="w-3.5 h-3.5" />
-                                  )}
-                                  {project.status}
+                                  ) }
+                                  { project.status }
                                 </span>
                               </td>
-                              <td className="py-2 px-3 text-sm font-medium" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>
-                                {remainingInfo.element}
+                              <td className="py-2 px-3 text-sm font-medium" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>
+                                { remainingInfo.element }
                               </td>
-                              <td className="py-2 px-3" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 500 }}>
+                              <td className="py-2 px-3" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 500 } }>
                                 <div className="flex items-center justify-center gap-2">
                                   <Link
-                                    to={`/project-management/projects/${project.id}`}
+                                    to={ `/project-management/projects/${project.id}` }
                                     className="bg-sky-100 hover:bg-sky-200 text-sky-700 p-2 rounded-lg transition-colors"
                                     title="عرض التفاصيل"
                                   >
                                     <Eye className="w-4 h-4" />
                                   </Link>
                                   <button
-                                    onClick={() => handleProjectImagesClick(project)}
-                                    className={`p-2 rounded-lg transition-colors ${hasProjectImage(project)
+                                    onClick={ () => handleProjectImagesClick(project) }
+                                    className={ `p-2 rounded-lg transition-colors ${hasProjectImage(project)
                                       ? 'bg-indigo-100 hover:bg-indigo-200 text-indigo-700'
                                       : 'bg-gray-100 hover:bg-gray-200 text-gray-400 opacity-50 cursor-not-allowed'
-                                      }`}
-                                    title={hasProjectImage(project) ? 'تنزيل صورة المشروع' : 'لا توجد صورة للمشروع'}
-                                    disabled={!hasProjectImage(project)}
+                                      }` }
+                                    title={ hasProjectImage(project) ? 'تنزيل صورة المشروع' : 'لا توجد صورة للمشروع' }
+                                    disabled={ !hasProjectImage(project) }
                                   >
                                     <Download className="w-4 h-4" />
                                   </button>
-                                  {isAdmin && (
+                                  { isAdmin && (
                                     <Link
-                                      to={`/project-management/projects/${project.id}/edit`}
+                                      to={ `/project-management/projects/${project.id}/edit` }
                                       className="bg-orange-100 hover:bg-orange-200 text-orange-700 p-2 rounded-lg transition-colors"
                                       title="تعديل"
                                     >
                                       <Edit className="w-4 h-4" />
                                     </Link>
-                                  )}
-                                  {isAdmin && (
+                                  ) }
+                                  { isAdmin && (
                                     <button
-                                      onClick={() => handleDeleteClick(project)}
-                                      disabled={deletingProject === (project.id || project._id)}
+                                      onClick={ () => handleDeleteClick(project) }
+                                      disabled={ deletingProject === (project.id || project._id) }
                                       className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                                       title="حذف المشروع"
                                     >
-                                      {deletingProject === (project.id || project._id) ? (
+                                      { deletingProject === (project.id || project._id) ? (
                                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
                                       ) : (
                                         <Trash2 className="w-4 h-4" />
-                                      )}
+                                      ) }
                                     </button>
-                                  )}
-                                  {/* ✅ زر التوريد - متاح في أي مرحلة */}
-                                  {isProjectManager && (
+                                  ) }
+                                  {/* ✅ زر التوريد - متاح في أي مرحلة */ }
+                                  { isProjectManager && (
                                     <button
-                                      onClick={() => handleOpenSupplyModal(project)}
+                                      onClick={ () => handleOpenSupplyModal(project) }
                                       className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 p-2 rounded-lg transition-colors"
-                                      title={project.status === 'جديد' ? 'التسوق من المخزن' : 'تحديث التوريد'}
+                                      title={ project.status === 'جديد' ? 'التسوق من المخزن' : 'تحديث التوريد' }
                                     >
                                       <ShoppingCart className="w-4 h-4" />
                                     </button>
-                                  )}
-                                  {/* زر إضافة عدد المستفيدين - لرئيس قسم التنفيذ و Project Manager */}
-                                  {(isExecutionHead || isProjectManager || normalizedRole.includes('رئيس') || String(user?.role || '').includes('رئيس') || String(user?.role_name || '').includes('رئيس')) && (
+                                  ) }
+                                  {/* زر إضافة عدد المستفيدين - لرئيس قسم التنفيذ و Project Manager */ }
+                                  { (isExecutionHead || isProjectManager || normalizedRole.includes('رئيس') || String(user?.role || '').includes('رئيس') || String(user?.role_name || '').includes('رئيس')) && (
                                     <button
-                                      onClick={() => handleOpenBeneficiariesModal(project)}
+                                      onClick={ () => handleOpenBeneficiariesModal(project) }
                                       className="bg-green-100 hover:bg-green-200 text-green-700 p-2 rounded-lg transition-colors"
                                       title="إضافة/تحديث عدد المستفيدين"
                                     >
                                       <Users className="w-4 h-4" />
                                     </button>
-                                  )}
+                                  ) }
                                 </div>
                               </td>
                             </>
                           ) : isProjectManager ? (
                             <>
                               <td className="py-4 px-6 text-sm font-medium text-gray-800">
-                                {project.__isFromWindow && project.__parentProject ? (
+                                { project.__isFromWindow && project.__parentProject ? (
                                   <div className="flex flex-col gap-1">
                                     <span className="text-xs text-gray-500">
-                                      {getProjectCode(project.__parentProject)}
+                                      { getProjectCode(project.__parentProject) }
                                     </span>
-                                    {/* ✅ عرض "اليوم" فقط للمشاريع اليومية، واسم الشهر التقويمي للمشاريع الشهرية (من تاريخ البداية) */}
-                                    {project.is_monthly_phase ? (
+                                    {/* ✅ عرض "اليوم" فقط للمشاريع اليومية، واسم الشهر التقويمي للمشاريع الشهرية (من تاريخ البداية) */ }
+                                    { project.is_monthly_phase ? (
                                       <span className="text-xs font-semibold text-purple-600">
-                                        {isOrphanSponsorCoordinator
+                                        { isOrphanSponsorCoordinator
                                           ? (project.month_number ? getDisplayMonthNameForProject(project) || `الشهر ${project.month_number}` : '---')
                                           : `الشهر ${project.month_number || '---'}`
                                         }
                                       </span>
                                     ) : (
                                       <span className="text-xs font-semibold text-purple-600">
-                                        اليوم {project.phase_day || project.phaseDay || '---'}
+                                        اليوم { project.phase_day || project.phaseDay || '---' }
                                       </span>
-                                    )}
+                                    ) }
                                   </div>
                                 ) : (
                                   projectCode
-                                )}
+                                ) }
                               </td>
                               <td className="py-4 px-6 text-sm text-gray-800">
                                 <div className="flex flex-col gap-1">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <span className={getDivisionTextColor(project)}>{projectName}</span>
-                                    {(project.is_urgent === true || project.is_urgent === 1 || project.is_urgent === '1' || project.is_urgent === 'true' || Boolean(project.is_urgent)) && project.status !== 'منتهي' && (
+                                    <span className={ getDivisionTextColor(project) }>{ projectName }</span>
+                                    { (project.is_urgent === true || project.is_urgent === 1 || project.is_urgent === '1' || project.is_urgent === 'true' || Boolean(project.is_urgent)) && project.status !== 'منتهي' && (
                                       <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-red-600 text-white border-2 border-red-700 shadow-lg animate-pulse ring-2 ring-red-400" title="مشروع عاجل">
                                         <AlertCircle className="w-4 h-4" />
                                         عاجل
                                       </span>
-                                    )}
+                                    ) }
                                   </div>
-                                  {renderProjectBadges(project)}
-                                  {(project.is_daily_phase || project.is_monthly_phase) && getSubProjectParentName(project) && (
+                                  { renderProjectBadges(project) }
+                                  { (project.is_daily_phase || project.is_monthly_phase) && getSubProjectParentName(project) && (
                                     <span className="text-xs text-gray-500">
-                                      من: {getSubProjectParentName(project)}
+                                      من: { getSubProjectParentName(project) }
                                     </span>
-                                  )}
-                                  {project.__isFromWindow && project.__parentProject && (
+                                  ) }
+                                  { project.__isFromWindow && project.__parentProject && (
                                     <span className="text-xs text-purple-600 font-semibold mt-1">
                                       نافذة: اليوم الحالي + 3 أيام قادمة
                                     </span>
-                                  )}
+                                  ) }
                                 </div>
                               </td>
                               <td className="py-4 px-6 text-sm font-medium text-gray-800">
-                                {project.is_daily_phase || project.__isFromWindow ? (
+                                { project.is_daily_phase || project.__isFromWindow ? (
                                   <div className="flex flex-col gap-1">
                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-100">
-                                      اليوم {project.phase_day || project.phaseDay || '---'}
+                                      اليوم { project.phase_day || project.phaseDay || '---' }
                                     </span>
-                                    {project.__isFromWindow && project.__parentProject && (
+                                    { project.__isFromWindow && project.__parentProject && (
                                       <span className="text-xs text-purple-600">
-                                        من {project.__parentProject.phase_duration_days || '---'} يوم
+                                        من { project.__parentProject.phase_duration_days || '---' } يوم
                                       </span>
-                                    )}
+                                    ) }
                                   </div>
                                 ) : project.is_monthly_phase ? (
                                   <div className="flex flex-col gap-1">
                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-                                      {isOrphanSponsorCoordinator
+                                      { isOrphanSponsorCoordinator
                                         ? (project.month_number ? getDisplayMonthNameForProject(project) || `الشهر ${project.month_number}` : '---')
                                         : `الشهر ${project.month_number || '---'}`
                                       }
                                     </span>
-                                    {project.parent_project?.total_months && (
+                                    { project.parent_project?.total_months && (
                                       <span className="text-xs text-purple-600">
-                                        من {project.parent_project.total_months} شهر
+                                        من { project.parent_project.total_months } شهر
                                       </span>
-                                    )}
+                                    ) }
                                   </div>
                                 ) : (
                                   <span className="text-gray-400">---</span>
-                                )}
+                                ) }
                               </td>
                               <td className="py-4 px-6 text-sm text-gray-700">
-                                {project.__isFromWindow && project.__parentProject
+                                { project.__isFromWindow && project.__parentProject
                                   ? (project.__parentProject.donor_name || project.__parentProject.donor?.name || '---')
-                                  : (project.donor_name || project.donor?.name || '---')}
+                                  : (project.donor_name || project.donor?.name || '---') }
                               </td>
                               <td className="py-4 px-6 text-sm text-gray-700 max-w-xs">
-                                <div className="line-clamp-2" title={getProjectDescription(project)}>
-                                  {getProjectDescription(project)}
+                                <div className="line-clamp-2" title={ getProjectDescription(project) }>
+                                  { getProjectDescription(project) }
                                 </div>
-                                {renderProjectBadges(project)}
-                                {(project.is_daily_phase || project.is_monthly_phase) && getSubProjectParentName(project) && (
+                                { renderProjectBadges(project) }
+                                { (project.is_daily_phase || project.is_monthly_phase) && getSubProjectParentName(project) && (
                                   <span className="text-xs text-gray-500 mt-1 block">
-                                    من: {getSubProjectParentName(project)}
-                                    {(project.is_monthly_phase || project.isMonthlyPhase) && (project.month_number != null || project.monthNumber != null) && (
+                                    من: { getSubProjectParentName(project) }
+                                    { (project.is_monthly_phase || project.isMonthlyPhase) && (project.month_number != null || project.monthNumber != null) && (
                                       <span className="text-purple-600 font-semibold">
-                                        {isOrphanSponsorCoordinator
+                                        { isOrphanSponsorCoordinator
                                           ? ` - ${getDisplayMonthNameForProject(project) || `الشهر ${project.month_number ?? project.monthNumber}`}`
                                           : ` - الشهر ${project.month_number ?? project.monthNumber}`
                                         }
                                       </span>
-                                    )}
-                                    {(project.is_daily_phase || project.isDailyPhase) && (project.phase_day != null || project.phaseDay != null) && (
-                                      <span className="text-blue-600 font-semibold"> - اليوم {project.phase_day ?? project.phaseDay}</span>
-                                    )}
+                                    ) }
+                                    { (project.is_daily_phase || project.isDailyPhase) && (project.phase_day != null || project.phaseDay != null) && (
+                                      <span className="text-blue-600 font-semibold"> - اليوم { project.phase_day ?? project.phaseDay }</span>
+                                    ) }
                                   </span>
-                                )}
+                                ) }
                               </td>
                               <td className="py-4 px-6 text-sm font-bold text-green-600">
-                                {project.__isFromWindow && project.__parentProject
+                                { project.__isFromWindow && project.__parentProject
                                   ? formatCurrency(calculateDailyAmount(project.__parentProject) || netAmount || 0)
-                                  : formatCurrency(netAmount || 0)}
-                                {project.__isFromWindow && project.__parentProject && (
+                                  : formatCurrency(netAmount || 0) }
+                                { project.__isFromWindow && project.__parentProject && (
                                   <span className="block text-xs text-gray-500 font-normal mt-1">
                                     (المبلغ اليومي)
                                   </span>
-                                )}
+                                ) }
                               </td>
                               <td className="py-4 px-6">
-                                { /* ✅ عرض حالة قابلة للنقر حسب الدور */}
-                                {(() => {
+                                { /* ✅ عرض حالة قابلة للنقر حسب الدور */ }
+                                { (() => {
                                   const postExecutionStatuses = ['تم التنفيذ', 'في المونتاج', 'تم المونتاج', 'يجب إعادة المونتاج', 'وصل للمتبرع'];
                                   const canClickStatus = isMediaManager
                                     ? postExecutionStatuses.includes(project.status)
@@ -8113,82 +8154,82 @@ const ProjectsList = () => {
 
                                   return canClickStatus ? (
                                     <span
-                                      onClick={() => handleExecutionStatusClick(project)}
-                                      className={`inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
+                                      onClick={ () => handleExecutionStatusClick(project) }
+                                      className={ `inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
                                         project.status
-                                      )} cursor-pointer hover:opacity-80 transition-opacity flex items-center gap-1`}
+                                      )} cursor-pointer hover:opacity-80 transition-opacity flex items-center gap-1` }
                                       title="انقر لتحديث الحالة"
                                     >
-                                      {project.status}
+                                      { project.status }
                                       <span className="text-xs">▼</span>
                                     </span>
                                   ) : canClickReadyForExecution ? (
                                     <span
-                                      onClick={() => handleStatusClick(project)}
-                                      className={`inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
+                                      onClick={ () => handleStatusClick(project) }
+                                      className={ `inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
                                         project.status
-                                      )} cursor-pointer hover:opacity-80 transition-opacity`}
+                                      )} cursor-pointer hover:opacity-80 transition-opacity` }
                                       title="انقر لنقل المشروع إلى 'تم التنفيذ'"
                                     >
-                                      {project.status}
+                                      { project.status }
                                     </span>
                                   ) : project.status === 'وصل للمتبرع' ? (
                                     <span
-                                      onClick={() => handleStatusClick(project)}
-                                      className={`inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
+                                      onClick={ () => handleStatusClick(project) }
+                                      className={ `inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
                                         project.status
-                                      )} cursor-pointer hover:opacity-80 transition-opacity`}
+                                      )} cursor-pointer hover:opacity-80 transition-opacity` }
                                       title="انقر للقبول/الرفض"
                                     >
-                                      {project.status}
+                                      { project.status }
                                     </span>
                                   ) : (
                                     <span
-                                      className={`inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
+                                      className={ `inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
                                         project.status
-                                      )}`}
+                                      )}` }
                                     >
-                                      {project.status}
+                                      { project.status }
                                     </span>
                                   );
-                                })()}
+                                })() }
                               </td>
                               <td className="py-4 px-6 text-sm font-medium">
-                                {remainingInfo.element}
+                                { remainingInfo.element }
                               </td>
                               <td className="py-4 px-6">
                                 <div className="flex items-center justify-center gap-2">
                                   <Link
-                                    to={`/project-management/projects/${project.id}`}
+                                    to={ `/project-management/projects/${project.id}` }
                                     className="bg-sky-100 hover:bg-sky-200 text-sky-700 p-2 rounded-lg transition-colors"
                                     title="عرض التفاصيل"
                                   >
                                     <Eye className="w-4 h-4" />
                                   </Link>
                                   <button
-                                    onClick={() => handleDownloadProjectImage(project)}
-                                    className={`p-2 rounded-lg transition-colors ${hasProjectImage(project)
+                                    onClick={ () => handleDownloadProjectImage(project) }
+                                    className={ `p-2 rounded-lg transition-colors ${hasProjectImage(project)
                                       ? 'bg-indigo-100 hover:bg-indigo-200 text-indigo-700'
                                       : 'bg-gray-100 hover:bg-gray-200 text-gray-400 opacity-50 cursor-not-allowed'
-                                      }`}
-                                    title={hasProjectImage(project) ? 'تنزيل صورة المشروع' : 'لا توجد صورة للمشروع'}
-                                    disabled={!hasProjectImage(project)}
+                                      }` }
+                                    title={ hasProjectImage(project) ? 'تنزيل صورة المشروع' : 'لا توجد صورة للمشروع' }
+                                    disabled={ !hasProjectImage(project) }
                                   >
                                     <Download className="w-4 h-4" />
                                   </button>
                                   <button
-                                    onClick={() => {
+                                    onClick={ () => {
                                       setSelectedProject(project);
                                       setAssignModalOpen(true);
-                                    }}
-                                    disabled={!canEditAssignment(project)}
+                                    } }
+                                    disabled={ !canEditAssignment(project) }
                                     className="bg-purple-100 hover:bg-purple-200 text-purple-700 p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title={canEditAssignment(project) ? 'تعديل الفريق المكلف' : 'لا يمكن التعديل - المشروع منتهي'}
+                                    title={ canEditAssignment(project) ? 'تعديل الفريق المكلف' : 'لا يمكن التعديل - المشروع منتهي' }
                                   >
                                     <Users className="w-4 h-4" />
                                   </button>
                                   <button
-                                    onClick={() => handleClearAssignedTeam(project)}
+                                    onClick={ () => handleClearAssignedTeam(project) }
                                     disabled={
                                       clearingAssignmentId === project.id ||
                                       (!project.assigned_team && !project.assigned_photographer && !project.team_name) ||
@@ -8201,170 +8242,170 @@ const ProjectsList = () => {
                                         : 'لا يمكن الحذف - المشروع منتهي'
                                     }
                                   >
-                                    {clearingAssignmentId === project.id ? (
+                                    { clearingAssignmentId === project.id ? (
                                       <span className="inline-flex h-4 w-4 border-2 border-red-700 border-t-transparent rounded-full animate-spin"></span>
                                     ) : (
                                       <X className="w-4 h-4" />
-                                    )}
+                                    ) }
                                   </button>
 
 
-                                  {/* زر تأجيل المشروع */}
-                                  {canPostponeProject(project) && (
+                                  {/* زر تأجيل المشروع */ }
+                                  { canPostponeProject(project) && (
                                     <button
-                                      onClick={() => {
+                                      onClick={ () => {
                                         setPostponingProjectId(project.id);
                                         setShowPostponeModal(true);
-                                      }}
-                                      disabled={isPostponing}
+                                      } }
+                                      disabled={ isPostponing }
                                       className="bg-amber-100 hover:bg-amber-200 text-amber-700 p-2 rounded-lg transition-colors disabled:opacity-50"
                                       title="تأجيل المشروع"
                                     >
                                       <Pause className="w-4 h-4" />
                                     </button>
-                                  )}
+                                  ) }
 
-                                  {/* ✅ زر التوريد - متاح في أي مرحلة */}
-                                  {user?.role === 'project_manager' && (
+                                  {/* ✅ زر التوريد - متاح في أي مرحلة */ }
+                                  { user?.role === 'project_manager' && (
                                     <Link
-                                      to={`/project-management/projects/${project.id}/supply`}
-                                      onClick={async (e) => {
+                                      to={ `/project-management/projects/${project.id}/supply` }
+                                      onClick={ async (e) => {
                                         // ✅ إذا كان المشروع في حالة "جديد"، نحاول نقله للتوريد أولاً
                                         if (project.status === 'جديد') {
                                           e.preventDefault();
                                           await handleMoveToSupply(project.id);
                                         }
                                         // ✅ في الحالات الأخرى، نذهب مباشرة لصفحة التوريد
-                                      }}
+                                      } }
                                       className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 p-2 rounded-lg transition-colors"
-                                      title={project.status === 'جديد' ? 'نقل للتوريد' : 'تحديث التوريد'}
+                                      title={ project.status === 'جديد' ? 'نقل للتوريد' : 'تحديث التوريد' }
                                     >
                                       <ShoppingCart className="w-4 h-4" />
                                     </Link>
-                                  )}
+                                  ) }
 
-                                  {/* زر استئناف المشروع */}
-                                  {project.status === 'مؤجل' && (
+                                  {/* زر استئناف المشروع */ }
+                                  { project.status === 'مؤجل' && (
                                     <button
-                                      onClick={() => handleResumeProject(project.id)}
-                                      disabled={isResuming}
+                                      onClick={ () => handleResumeProject(project.id) }
+                                      disabled={ isResuming }
                                       className="bg-green-100 hover:bg-green-200 text-green-700 p-2 rounded-lg transition-colors disabled:opacity-50"
                                       title="استئناف المشروع"
                                     >
-                                      {isResuming ? (
+                                      { isResuming ? (
                                         <span className="inline-flex h-4 w-4 border-2 border-green-700 border-t-transparent rounded-full animate-spin"></span>
                                       ) : (
                                         <PlayCircle className="w-4 h-4" />
-                                      )}
+                                      ) }
                                     </button>
-                                  )}
-                                  {/* زر إضافة عدد المستفيدين - لرئيس قسم التنفيذ و Project Manager */}
-                                  {(isExecutionHead || isProjectManager || normalizedRole.includes('رئيس') || String(user?.role || '').includes('رئيس') || String(user?.role_name || '').includes('رئيس')) && (
+                                  ) }
+                                  {/* زر إضافة عدد المستفيدين - لرئيس قسم التنفيذ و Project Manager */ }
+                                  { (isExecutionHead || isProjectManager || normalizedRole.includes('رئيس') || String(user?.role || '').includes('رئيس') || String(user?.role_name || '').includes('رئيس')) && (
                                     <button
-                                      onClick={() => handleOpenBeneficiariesModal(project)}
+                                      onClick={ () => handleOpenBeneficiariesModal(project) }
                                       className="bg-green-100 hover:bg-green-200 text-green-700 p-2 rounded-lg transition-colors"
                                       title="إضافة/تحديث عدد المستفيدين"
                                     >
                                       <Users className="w-4 h-4" />
                                     </button>
-                                  )}
+                                  ) }
                                 </div>
                               </td>
                             </>
                           ) : isExecutedCoordinator ? (
                             <>
                               <td className="py-4 px-6 text-sm font-medium text-gray-800">
-                                {(project?.donor_code || project?.internal_code) ? (
+                                { (project?.donor_code || project?.internal_code) ? (
                                   <span className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-bold bg-amber-100 text-amber-700 border border-amber-300">
-                                    {getProjectCode(project, '---')}
+                                    { getProjectCode(project, '---') }
                                   </span>
                                 ) : (
                                   <span className="text-gray-400">---</span>
-                                )}
+                                ) }
                               </td>
                               <td className="py-4 px-6 text-sm text-gray-700 max-w-xs">
                                 <div className="flex flex-col gap-2">
-                                  <div className="line-clamp-2" title={getProjectDescription(project)}>
-                                    {getProjectDescription(project)}
+                                  <div className="line-clamp-2" title={ getProjectDescription(project) }>
+                                    { getProjectDescription(project) }
                                   </div>
-                                  {/* ✅ عرض عدد الأيتام المكفولين لمشاريع الكفالة */}
-                                  {isOrphanSponsorshipProject(project) && (project.sponsored_orphans_count > 0 || project.has_sponsored_orphans) && (
+                                  {/* ✅ عرض عدد الأيتام المكفولين لمشاريع الكفالة */ }
+                                  { isOrphanSponsorshipProject(project) && (project.sponsored_orphans_count > 0 || project.has_sponsored_orphans) && (
                                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-700 border border-purple-300 w-fit">
                                       <Users className="w-3 h-3" />
-                                      {project.sponsored_orphans_count || 0} يتيم مكفول
+                                      { project.sponsored_orphans_count || 0 } يتيم مكفول
                                     </span>
-                                  )}
+                                  ) }
                                 </div>
                               </td>
                               <td className="py-4 px-6 text-sm text-gray-700">
-                                {getAssignedTeamName(project)}
+                                { getAssignedTeamName(project) }
                               </td>
                               <td className="py-4 px-6 text-sm text-gray-700">
-                                {project.assigned_photographer?.name ||
+                                { project.assigned_photographer?.name ||
                                   project.photographer_name ||
                                   project.photographer?.name ||
-                                  '-'}
+                                  '-' }
                               </td>
                               <td className="py-4 px-6">
-                                {(() => {
+                                { (() => {
                                   // ✅ لدور منسق الكفالات فقط: السماح بالنقر على "جاهز للتنفيذ" لنقل مباشر إلى "تم التنفيذ"
                                   const canClickReadyForExecution = isOrphanSponsorCoordinator && project.status === 'جاهز للتنفيذ';
                                   const canClickDonorReceived = project.status === 'وصل للمتبرع';
 
                                   return canClickReadyForExecution ? (
                                     <span
-                                      onClick={() => handleStatusClick(project)}
-                                      className={`inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
+                                      onClick={ () => handleStatusClick(project) }
+                                      className={ `inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
                                         project.status
-                                      )} cursor-pointer hover:opacity-80 transition-opacity`}
+                                      )} cursor-pointer hover:opacity-80 transition-opacity` }
                                       title="انقر لنقل المشروع إلى 'تم التنفيذ'"
                                     >
-                                      {project.status}
+                                      { project.status }
                                     </span>
                                   ) : canClickDonorReceived ? (
                                     <span
-                                      onClick={() => handleStatusClick(project)}
-                                      className={`inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
+                                      onClick={ () => handleStatusClick(project) }
+                                      className={ `inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
                                         project.status
-                                      )} cursor-pointer hover:opacity-80 transition-opacity`}
+                                      )} cursor-pointer hover:opacity-80 transition-opacity` }
                                       title="انقر للموافقة/الرفض"
                                     >
-                                      {project.status}
+                                      { project.status }
                                     </span>
                                   ) : (
                                     <span
-                                      className={`inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
+                                      className={ `inline-block px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(
                                         project.status
-                                      )}`}
+                                      )}` }
                                     >
-                                      {project.status}
+                                      { project.status }
                                     </span>
                                   );
-                                })()}
+                                })() }
                               </td>
                               <td className="py-4 px-6">
                                 <div className="flex items-center justify-center gap-2">
                                   <Link
-                                    to={`/project-management/projects/${project.id}`}
+                                    to={ `/project-management/projects/${project.id}` }
                                     className="bg-sky-100 hover:bg-sky-200 text-sky-700 p-2 rounded-lg transition-colors"
                                     title="عرض التفاصيل"
                                   >
                                     <Eye className="w-4 h-4" />
                                   </Link>
                                   <button
-                                    onClick={() => handleDownloadProjectImage(project)}
-                                    className={`p-2 rounded-lg transition-colors ${hasProjectImage(project)
+                                    onClick={ () => handleDownloadProjectImage(project) }
+                                    className={ `p-2 rounded-lg transition-colors ${hasProjectImage(project)
                                       ? 'bg-indigo-100 hover:bg-indigo-200 text-indigo-700'
                                       : 'bg-gray-100 hover:bg-gray-200 text-gray-400 opacity-50 cursor-not-allowed'
-                                      }`}
-                                    title={hasProjectImage(project) ? 'تنزيل صورة المشروع' : 'لا توجد صورة للمشروع'}
-                                    disabled={!hasProjectImage(project)}
+                                      }` }
+                                    title={ hasProjectImage(project) ? 'تنزيل صورة المشروع' : 'لا توجد صورة للمشروع' }
+                                    disabled={ !hasProjectImage(project) }
                                   >
                                     <Download className="w-4 h-4" />
                                   </button>
                                   <button
-                                    onClick={() => handleOpenShelterModal(project)}
-                                    disabled={project.status !== 'جاهز للتنفيذ' || !!(project.shelter_id || project.shelter?.id)}
+                                    onClick={ () => handleOpenShelterModal(project) }
+                                    disabled={ project.status !== 'جاهز للتنفيذ' || !!(project.shelter_id || project.shelter?.id) }
                                     className="bg-orange-100 hover:bg-orange-200 text-orange-700 p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     title={
                                       project.status === 'جاهز للتنفيذ' && !(project.shelter_id || project.shelter?.id)
@@ -8376,108 +8417,108 @@ const ProjectsList = () => {
                                   >
                                     <Home className="w-4 h-4" />
                                   </button>
-                                  {/* زر إضافة عدد المستفيدين - لرئيس قسم التنفيذ و Project Manager */}
-                                  {(isExecutionHead || isProjectManager || normalizedRole.includes('رئيس') || String(user?.role || '').includes('رئيس') || String(user?.role_name || '').includes('رئيس')) && (
+                                  {/* زر إضافة عدد المستفيدين - لرئيس قسم التنفيذ و Project Manager */ }
+                                  { (isExecutionHead || isProjectManager || normalizedRole.includes('رئيس') || String(user?.role || '').includes('رئيس') || String(user?.role_name || '').includes('رئيس')) && (
                                     <button
-                                      onClick={() => handleOpenBeneficiariesModal(project)}
+                                      onClick={ () => handleOpenBeneficiariesModal(project) }
                                       className="bg-green-100 hover:bg-green-200 text-green-700 p-2 rounded-lg transition-colors"
                                       title="إضافة/تحديث عدد المستفيدين"
                                     >
                                       <Users className="w-4 h-4" />
                                     </button>
-                                  )}
-                                  {/* ✅ زر نقل للتوريد - لمشاريع الكفالة (منسق الأيتام) */}
-                                  {isSponsorshipProject(project) &&
+                                  ) }
+                                  {/* ✅ زر نقل للتوريد - لمشاريع الكفالة (منسق الأيتام) */ }
+                                  { isSponsorshipProject(project) &&
                                     isOrphanSponsorCoordinator && (
                                       <button
-                                        onClick={() => handleTransferToSupply(project)}
+                                        onClick={ () => handleTransferToSupply(project) }
                                         className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 p-2 rounded-lg transition-colors"
-                                        title={project.status === 'جديد' ? 'نقل للتوريد' : 'تحديث التوريد'}
+                                        title={ project.status === 'جديد' ? 'نقل للتوريد' : 'تحديث التوريد' }
                                       >
                                         <Package className="w-4 h-4" />
                                       </button>
-                                    )}
-                                  {/* ✅ زر إسناد باحث - لمشاريع الكفالة (منسق الأيتام) - متاح في كل المراحل */}
-                                  {isSponsorshipProject(project) &&
+                                    ) }
+                                  {/* ✅ زر إسناد باحث - لمشاريع الكفالة (منسق الأيتام) - متاح في كل المراحل */ }
+                                  { isSponsorshipProject(project) &&
                                     isOrphanSponsorCoordinator && (
                                       <button
-                                        onClick={() => {
+                                        onClick={ () => {
                                           setSelectedProject(project);
                                           setAssignModalOpen(true);
-                                        }}
+                                        } }
                                         className="bg-amber-100 hover:bg-amber-200 text-amber-700 p-2 rounded-lg transition-colors"
                                         title="إسناد/تعديل باحث"
                                       >
                                         <UserCheck className="w-4 h-4" />
                                       </button>
-                                    )}
-                                  {/* ✅ زر إدارة الأيتام - لمشاريع الكفالة (متاح في كل المراحل) */}
-                                  {isSponsorshipProject(project) &&
+                                    ) }
+                                  {/* ✅ زر إدارة الأيتام - لمشاريع الكفالة (متاح في كل المراحل) */ }
+                                  { isSponsorshipProject(project) &&
                                     (isOrphanSponsorCoordinator || isAdmin) && (
                                       <button
-                                        onClick={() => handleOpenOrphansModal(project)}
+                                        onClick={ () => handleOpenOrphansModal(project) }
                                         className="bg-purple-100 hover:bg-purple-200 text-purple-700 p-2 rounded-lg transition-colors"
                                         title="إضافة/إدارة الأيتام المكفولين"
                                       >
                                         <Users className="w-4 h-4" />
                                       </button>
-                                    )}
-                                  {/* ✅ زر نقل للتنفيذ بدون مخيم - لمشاريع الكفالة */}
-                                  {isSponsorshipProject(project) &&
+                                    ) }
+                                  {/* ✅ زر نقل للتنفيذ بدون مخيم - لمشاريع الكفالة */ }
+                                  { isSponsorshipProject(project) &&
                                     project.status === 'جاهز للتنفيذ' &&
                                     (isOrphanSponsorCoordinator || isExecutedCoordinator || isAdmin) && (
                                       <button
-                                        onClick={() => handleTransferToExecution(project.id)}
-                                        disabled={transferringToExecution === project.id}
+                                        onClick={ () => handleTransferToExecution(project.id) }
+                                        disabled={ transferringToExecution === project.id }
                                         className="bg-blue-100 hover:bg-blue-200 text-blue-700 p-2 rounded-lg transition-colors disabled:opacity-50"
                                         title="نقل للتنفيذ (مشاريع الكفالة لا تحتاج مخيم)"
                                       >
-                                        {transferringToExecution === project.id ? (
+                                        { transferringToExecution === project.id ? (
                                           <span className="inline-flex h-4 w-4 border-2 border-blue-700 border-t-transparent rounded-full animate-spin"></span>
                                         ) : (
                                           <PlayCircle className="w-4 h-4" />
-                                        )}
+                                        ) }
                                       </button>
-                                    )}
+                                    ) }
                                 </div>
                               </td>
                             </>
                           ) : (
                             <>
-                              <td className="py-4 px-6 text-sm font-medium text-gray-800">{project.donor_code}</td>
+                              <td className="py-4 px-6 text-sm font-medium text-gray-800">{ project.donor_code }</td>
                               <td className="py-4 px-6 text-sm text-gray-800 font-medium">
                                 <div className="flex flex-col gap-1">
-                                  <span className="font-semibold">{projectName}</span>
-                                  {(project.is_daily_phase || project.is_monthly_phase) && getSubProjectParentName(project) && (
+                                  <span className="font-semibold">{ projectName }</span>
+                                  { (project.is_daily_phase || project.is_monthly_phase) && getSubProjectParentName(project) && (
                                     <span className="text-xs text-gray-500">
-                                      من: {getSubProjectParentName(project)}
+                                      من: { getSubProjectParentName(project) }
                                     </span>
-                                  )}
+                                  ) }
                                 </div>
                               </td>
                               <td className="py-4 px-6 text-sm text-gray-700 max-w-xs">
                                 <div className="flex flex-col gap-2">
-                                  <div className="line-clamp-2" title={getProjectDescription(project)}>
-                                    {getProjectDescription(project)}
+                                  <div className="line-clamp-2" title={ getProjectDescription(project) }>
+                                    { getProjectDescription(project) }
                                   </div>
-                                  {/* ✅ عرض عدد الأيتام المكفولين لمشاريع الكفالة */}
-                                  {isOrphanSponsorshipProject(project) && (project.sponsored_orphans_count > 0 || project.has_sponsored_orphans) && (
+                                  {/* ✅ عرض عدد الأيتام المكفولين لمشاريع الكفالة */ }
+                                  { isOrphanSponsorshipProject(project) && (project.sponsored_orphans_count > 0 || project.has_sponsored_orphans) && (
                                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-700 border border-purple-300 w-fit">
                                       <Users className="w-3 h-3" />
-                                      {project.sponsored_orphans_count || 0} يتيم مكفول
+                                      { project.sponsored_orphans_count || 0 } يتيم مكفول
                                     </span>
-                                  )}
-                                  {isPostponed && (
+                                  ) }
+                                  { isPostponed && (
                                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-gradient-to-r from-orange-400 to-amber-500 text-white border-2 border-orange-600 shadow-lg animate-pulse w-fit">
                                       <Clock className="w-3 h-3" />
                                       مؤجل
                                     </span>
-                                  )}
+                                  ) }
                                 </div>
                               </td>
-                              <td className="py-4 px-6 text-sm text-gray-800">{project.donor_name}</td>
+                              <td className="py-4 px-6 text-sm text-gray-800">{ project.donor_name }</td>
                               <td className="py-4 px-6 text-sm text-gray-800">
-                                {(() => {
+                                { (() => {
                                   // ✅ استخدام الدالة المساعدة لاستخراج رقم الشهر واسم الشهر (من تاريخ البداية: الشهر 2 = مارس إذا البداية فبراير)
                                   const monthNum = getMonthNumber(project);
 
@@ -8488,7 +8529,7 @@ const ProjectsList = () => {
                                     if (isOrphanSponsorCoordinator) {
                                       return (
                                         <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                                          {monthName || `الشهر ${monthNum}`}
+                                          { monthName || `الشهر ${monthNum}` }
                                         </span>
                                       );
                                     }
@@ -8496,221 +8537,221 @@ const ProjectsList = () => {
                                     // ✅ للأدوار الأخرى: عرض الرقم مع اسم الشهر
                                     return (
                                       <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                                        {monthNum}{monthName ? ` (${monthName})` : ''}
+                                        { monthNum }{ monthName ? ` (${monthName})` : '' }
                                       </span>
                                     );
                                   }
 
                                   return <span className="text-gray-400">---</span>;
-                                })()}
+                                })() }
                               </td>
                               <td className="py-4 px-6">
-                                {(() => {
+                                { (() => {
                                   // ✅ لدور منسق الكفالات فقط: السماح بالنقر على "جاهز للتنفيذ" لنقل مباشر إلى "تم التنفيذ"
                                   const canClickReadyForExecution = isOrphanSponsorCoordinator && project.status === 'جاهز للتنفيذ';
                                   const canClickDonorReceived = project.status === 'وصل للمتبرع';
 
                                   return canClickReadyForExecution || canClickDonorReceived ? (
                                     <span
-                                      onClick={() => handleStatusClick(project)}
-                                      className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${isPostponed ? 'bg-gradient-to-r from-orange-100 to-amber-200 text-orange-800 border-2 border-orange-400 font-bold shadow-md' : `${getStatusColor(project.status)} text-white`} cursor-pointer hover:opacity-80 transition-opacity`}
-                                      title={canClickReadyForExecution ? 'انقر لنقل المشروع إلى \'تم التنفيذ\'' : 'انقر للموافقة/الرفض'}
+                                      onClick={ () => handleStatusClick(project) }
+                                      className={ `inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${isPostponed ? 'bg-gradient-to-r from-orange-100 to-amber-200 text-orange-800 border-2 border-orange-400 font-bold shadow-md' : `${getStatusColor(project.status)} text-white`} cursor-pointer hover:opacity-80 transition-opacity` }
+                                      title={ canClickReadyForExecution ? 'انقر لنقل المشروع إلى \'تم التنفيذ\'' : 'انقر للموافقة/الرفض' }
                                     >
-                                      {isPostponed && (
+                                      { isPostponed && (
                                         <Clock className="w-3.5 h-3.5" />
-                                      )}
-                                      {project.status}
+                                      ) }
+                                      { project.status }
                                     </span>
                                   ) : (
                                     <span
-                                      className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${isPostponed ? 'bg-gradient-to-r from-orange-100 to-amber-200 text-orange-800 border-2 border-orange-400 font-bold shadow-md' : `${getStatusColor(project.status)} text-white`}`}
+                                      className={ `inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${isPostponed ? 'bg-gradient-to-r from-orange-100 to-amber-200 text-orange-800 border-2 border-orange-400 font-bold shadow-md' : `${getStatusColor(project.status)} text-white`}` }
                                     >
-                                      {isPostponed && (
+                                      { isPostponed && (
                                         <Clock className="w-3.5 h-3.5" />
-                                      )}
-                                      {project.status}
+                                      ) }
+                                      { project.status }
                                     </span>
                                   );
-                                })()}
+                                })() }
                               </td>
-                              {!isOrphanSponsorCoordinator && (
+                              { !isOrphanSponsorCoordinator && (
                                 <td className="py-4 px-6 text-sm text-gray-700">
-                                  {getAssignedTeamName(project)}
+                                  { getAssignedTeamName(project) }
                                 </td>
-                              )}
+                              ) }
                               <td className="py-4 px-6 text-sm text-gray-700">
-                                {project.assigned_photographer?.name ||
+                                { project.assigned_photographer?.name ||
                                   project.photographer_name ||
                                   project.photographer?.name ||
-                                  '-'}
+                                  '-' }
                               </td>
-                              <td className="py-4 px-6 text-sm text-gray-600">{formatDate(project.created_at)}</td>
-                              {!isOrphanSponsorCoordinator && (
-                                <td className="py-4 px-6 text-sm text-gray-600">{formatDate(project.updated_at)}</td>
-                              )}
+                              <td className="py-4 px-6 text-sm text-gray-600">{ formatDate(project.created_at) }</td>
+                              { !isOrphanSponsorCoordinator && (
+                                <td className="py-4 px-6 text-sm text-gray-600">{ formatDate(project.updated_at) }</td>
+                              ) }
                               <td className="py-4 px-6">
                                 <div className="flex items-center justify-center gap-2">
                                   <Link
-                                    to={`/project-management/projects/${project.id}`}
+                                    to={ `/project-management/projects/${project.id}` }
                                     className="bg-sky-100 hover:bg-sky-200 text-sky-700 p-2 rounded-lg transition-colors"
                                     title="عرض التفاصيل"
                                   >
                                     <Eye className="w-4 h-4" />
                                   </Link>
                                   <button
-                                    onClick={() => handleDownloadProjectImage(project)}
-                                    className={`p-2 rounded-lg transition-colors ${hasProjectImage(project)
+                                    onClick={ () => handleDownloadProjectImage(project) }
+                                    className={ `p-2 rounded-lg transition-colors ${hasProjectImage(project)
                                       ? 'bg-indigo-100 hover:bg-indigo-200 text-indigo-700'
                                       : 'bg-gray-100 hover:bg-gray-200 text-gray-400 opacity-50 cursor-not-allowed'
-                                      }`}
-                                    title={hasProjectImage(project) ? 'تنزيل صورة المشروع' : 'لا توجد صورة للمشروع'}
-                                    disabled={!hasProjectImage(project)}
+                                      }` }
+                                    title={ hasProjectImage(project) ? 'تنزيل صورة المشروع' : 'لا توجد صورة للمشروع' }
+                                    disabled={ !hasProjectImage(project) }
                                   >
                                     <Download className="w-4 h-4" />
                                   </button>
-                                  {/* زر إضافة عدد المستفيدين - لرئيس قسم التنفيذ و Project Manager */}
-                                  {(isExecutionHead || isProjectManager || normalizedRole.includes('رئيس') || String(user?.role || '').includes('رئيس') || String(user?.role_name || '').includes('رئيس')) && (
+                                  {/* زر إضافة عدد المستفيدين - لرئيس قسم التنفيذ و Project Manager */ }
+                                  { (isExecutionHead || isProjectManager || normalizedRole.includes('رئيس') || String(user?.role || '').includes('رئيس') || String(user?.role_name || '').includes('رئيس')) && (
                                     <button
-                                      onClick={() => handleOpenBeneficiariesModal(project)}
+                                      onClick={ () => handleOpenBeneficiariesModal(project) }
                                       className="bg-green-100 hover:bg-green-200 text-green-700 p-2 rounded-lg transition-colors"
                                       title="إضافة/تحديث عدد المستفيدين"
                                     >
                                       <Users className="w-4 h-4" />
                                     </button>
-                                  )}
-                                  {/* ✅ زر نقل للتوريد - لمشاريع الكفالة (منسق الأيتام) */}
-                                  {isSponsorshipProject(project) &&
+                                  ) }
+                                  {/* ✅ زر نقل للتوريد - لمشاريع الكفالة (منسق الأيتام) */ }
+                                  { isSponsorshipProject(project) &&
                                     isOrphanSponsorCoordinator && (
                                       <button
-                                        onClick={() => handleTransferToSupply(project)}
+                                        onClick={ () => handleTransferToSupply(project) }
                                         className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 p-2 rounded-lg transition-colors"
-                                        title={project.status === 'جديد' ? 'إضافة كفالة' : 'تحديث الكفالة'}
+                                        title={ project.status === 'جديد' ? 'إضافة كفالة' : 'تحديث الكفالة' }
                                       >
                                         <Package className="w-4 h-4" />
                                       </button>
-                                    )}
-                                  {/* ✅ زر إسناد باحث - لمشاريع الكفالة (منسق الأيتام) - متاح في كل المراحل */}
-                                  {isSponsorshipProject(project) &&
+                                    ) }
+                                  {/* ✅ زر إسناد باحث - لمشاريع الكفالة (منسق الأيتام) - متاح في كل المراحل */ }
+                                  { isSponsorshipProject(project) &&
                                     isOrphanSponsorCoordinator && (
                                       <button
-                                        onClick={() => {
+                                        onClick={ () => {
                                           setSelectedProject(project);
                                           setAssignModalOpen(true);
-                                        }}
+                                        } }
                                         className="bg-amber-100 hover:bg-amber-200 text-amber-700 p-2 rounded-lg transition-colors"
                                         title="إسناد/تعديل باحث"
                                       >
                                         <UserCheck className="w-4 h-4" />
                                       </button>
-                                    )}
-                                  {/* ✅ زر إدارة الأيتام - لمشاريع الكفالة (متاح في كل المراحل) */}
-                                  {isSponsorshipProject(project) &&
+                                    ) }
+                                  {/* ✅ زر إدارة الأيتام - لمشاريع الكفالة (متاح في كل المراحل) */ }
+                                  { isSponsorshipProject(project) &&
                                     (isOrphanSponsorCoordinator || isAdmin) && (
                                       <button
-                                        onClick={() => handleOpenOrphansModal(project)}
+                                        onClick={ () => handleOpenOrphansModal(project) }
                                         className="bg-purple-100 hover:bg-purple-200 text-purple-700 p-2 rounded-lg transition-colors"
                                         title="إضافة/إدارة الأيتام المكفولين"
                                       >
                                         <Users className="w-4 h-4" />
                                       </button>
-                                    )}
+                                    ) }
 
-                                  {/* زر تأجيل المشروع */}
-                                  {user?.role === 'project_manager' && canPostponeProject(project) && (
+                                  {/* زر تأجيل المشروع */ }
+                                  { user?.role === 'project_manager' && canPostponeProject(project) && (
                                     <button
-                                      onClick={() => {
+                                      onClick={ () => {
                                         setPostponingProjectId(project.id);
                                         setShowPostponeModal(true);
-                                      }}
-                                      disabled={isPostponing}
+                                      } }
+                                      disabled={ isPostponing }
                                       className="bg-amber-100 hover:bg-amber-200 text-amber-700 p-2 rounded-lg transition-colors disabled:opacity-50"
                                       title="تأجيل المشروع"
                                     >
                                       <Pause className="w-4 h-4" />
                                     </button>
-                                  )}
+                                  ) }
 
-                                  {/* زر نقل للتوريد */}
-                                  {user?.role === 'project_manager' && project.status === 'جديد' && (
+                                  {/* زر نقل للتوريد */ }
+                                  { user?.role === 'project_manager' && project.status === 'جديد' && (
                                     <Link
-                                      to={`/project-management/projects/${project.id}/supply`}
-                                      onClick={async (e) => {
+                                      to={ `/project-management/projects/${project.id}/supply` }
+                                      onClick={ async (e) => {
                                         // إذا كان المشروع في حالة "جديد"، نحاول نقله للتوريد أولاً
                                         if (project.status === 'جديد') {
                                           e.preventDefault();
                                           await handleMoveToSupply(project.id);
                                         }
-                                      }}
+                                      } }
                                       className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 p-2 rounded-lg transition-colors"
                                       title="نقل للتوريد"
                                     >
                                       <ShoppingCart className="w-4 h-4" />
                                     </Link>
-                                  )}
+                                  ) }
 
-                                  {/* زر عرض سلة التوريد (إذا كان المشروع في مرحلة التوريد) */}
-                                  {user?.role === 'project_manager' && project.status === 'قيد التوريد' && (
+                                  {/* زر عرض سلة التوريد (إذا كان المشروع في مرحلة التوريد) */ }
+                                  { user?.role === 'project_manager' && project.status === 'قيد التوريد' && (
                                     <Link
-                                      to={`/project-management/projects/${project.id}/supply`}
+                                      to={ `/project-management/projects/${project.id}/supply` }
                                       className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 p-2 rounded-lg transition-colors"
                                       title="عرض سلة التوريد"
                                     >
                                       <ShoppingCart className="w-4 h-4" />
                                     </Link>
-                                  )}
+                                  ) }
 
-                                  {/* زر استئناف المشروع */}
-                                  {user?.role === 'project_manager' && project.status === 'مؤجل' && (
+                                  {/* زر استئناف المشروع */ }
+                                  { user?.role === 'project_manager' && project.status === 'مؤجل' && (
                                     <button
-                                      onClick={() => handleResumeProject(project.id)}
-                                      disabled={isResuming}
+                                      onClick={ () => handleResumeProject(project.id) }
+                                      disabled={ isResuming }
                                       className="bg-green-100 hover:bg-green-200 text-green-700 p-2 rounded-lg transition-colors disabled:opacity-50"
                                       title="استئناف المشروع"
                                     >
-                                      {isResuming ? (
+                                      { isResuming ? (
                                         <span className="inline-flex h-4 w-4 border-2 border-green-700 border-t-transparent rounded-full animate-spin"></span>
                                       ) : (
                                         <PlayCircle className="w-4 h-4" />
-                                      )}
+                                      ) }
                                     </button>
-                                  )}
+                                  ) }
 
-                                  {user?.role === 'admin' && (
+                                  { user?.role === 'admin' && (
                                     <>
                                       <Link
-                                        to={`/project-management/projects/${project.id}/edit`}
+                                        to={ `/project-management/projects/${project.id}/edit` }
                                         className="bg-orange-100 hover:bg-orange-200 text-orange-700 p-2 rounded-lg transition-colors"
                                         title="تعديل"
                                       >
                                         <Edit className="w-4 h-4" />
                                       </Link>
                                       <button
-                                        onClick={() => handleDeleteClick(project)}
-                                        disabled={deletingProject === (project.id || project._id)}
+                                        onClick={ () => handleDeleteClick(project) }
+                                        disabled={ deletingProject === (project.id || project._id) }
                                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                                         title="حذف المشروع"
                                       >
-                                        {deletingProject === (project.id || project._id) ? (
+                                        { deletingProject === (project.id || project._id) ? (
                                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
                                         ) : (
                                           <Trash2 className="w-4 h-4" />
-                                        )}
+                                        ) }
                                       </button>
                                     </>
-                                  )}
+                                  ) }
                                 </div>
                               </td>
                             </>
-                          )}
+                          ) }
                         </tr>
                       );
-                    })}
+                    }) }
                   </tbody>
                 </table>
               </div>
 
-              {/* Pagination */}
-              {(() => {
+              {/* Pagination */ }
+              { (() => {
                 // حساب pagination info بناءً على ما إذا كان الترتيب حسب التاريخ أم لا
                 const isDateSort = sortConfig?.key === 'created_at' || sortConfig?.key === 'updated_at';
                 // ✅ استخدام visibleProjects.length دائماً للحصول على العدد الكلي الفعلي (بعد الفلترة، بدون المشاريع المخفية)
@@ -8731,81 +8772,81 @@ const ProjectsList = () => {
                 return (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-5 py-4 border-t-2 border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
                     <div className="flex flex-wrap items-center gap-4">
-                      <p className="text-sm font-semibold text-gray-700 bg-white px-4 py-2 rounded-xl shadow-sm border border-gray-200" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>
-                        عرض {startIndex} - {endIndex} من {totalItems} نتيجة
+                      <p className="text-sm font-semibold text-gray-700 bg-white px-4 py-2 rounded-xl shadow-sm border border-gray-200" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>
+                        عرض { startIndex } - { endIndex } من { totalItems } نتيجة
                       </p>
-                      {/* خيار اختيار عدد المشاريع المعروضة */}
+                      {/* خيار اختيار عدد المشاريع المعروضة */ }
                       <div className="flex items-center gap-2">
-                        <label htmlFor="perPageSelect" className="text-sm font-semibold text-gray-700 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}>
+                        <label htmlFor="perPageSelect" className="text-sm font-semibold text-gray-700 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }>
                           عدد العناصر:
                         </label>
                         <select
                           id="perPageSelect"
-                          value={filters.perPage === 'all' ? 'all' : filters.perPage}
-                          onChange={(e) => {
+                          value={ filters.perPage === 'all' ? 'all' : filters.perPage }
+                          onChange={ (e) => {
                             const value = e.target.value;
                             if (value === 'all') {
                               handlePerPageChange('all');
                             } else {
                               handlePerPageChange(Number(value));
                             }
-                          }}
+                          } }
                           className="px-4 py-2 text-sm border-2 border-gray-200 rounded-xl bg-white text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 cursor-pointer shadow-sm hover:shadow-md transition-all"
-                          style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 600 }}
+                          style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 600 } }
                         >
-                          <option value={10}>10</option>
-                          <option value={25}>25</option>
-                          <option value={50}>50</option>
-                          <option value={100}>100</option>
-                          <option value={250}>250</option>
-                          {!isFinishedProjectsPage && <option value="all">الكل (500)</option>}
+                          <option value={ 10 }>10</option>
+                          <option value={ 25 }>25</option>
+                          <option value={ 50 }>50</option>
+                          <option value={ 100 }>100</option>
+                          <option value={ 250 }>250</option>
+                          { !isFinishedProjectsPage && <option value="all">الكل (500)</option> }
                         </select>
                       </div>
                     </div>
-                    {lastPage > 1 && !isShowingAll && (
+                    { lastPage > 1 && !isShowingAll && (
                       <div className="flex items-center gap-3">
                         <button
-                          onClick={() => handlePageChange(currentPage - 1)}
-                          disabled={currentPage === 1}
+                          onClick={ () => handlePageChange(currentPage - 1) }
+                          disabled={ currentPage === 1 }
                           className="p-3 rounded-xl bg-white hover:bg-sky-50 border-2 border-gray-200 hover:border-sky-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md transform hover:-translate-y-0.5"
                         >
                           <ChevronRight className="w-5 h-5 text-gray-700" />
                         </button>
-                        <span className="text-sm font-bold text-gray-800 bg-white px-5 py-3 rounded-xl shadow-sm border-2 border-gray-200 whitespace-nowrap" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>
-                          صفحة {currentPage} من {lastPage}
+                        <span className="text-sm font-bold text-gray-800 bg-white px-5 py-3 rounded-xl shadow-sm border-2 border-gray-200 whitespace-nowrap" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>
+                          صفحة { currentPage } من { lastPage }
                         </span>
                         <button
-                          onClick={() => handlePageChange(currentPage + 1)}
-                          disabled={currentPage === lastPage}
+                          onClick={ () => handlePageChange(currentPage + 1) }
+                          disabled={ currentPage === lastPage }
                           className="p-3 rounded-xl bg-white hover:bg-sky-50 border-2 border-gray-200 hover:border-sky-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md transform hover:-translate-y-0.5"
                         >
                           <ChevronLeft className="w-5 h-5 text-gray-700" />
                         </button>
                       </div>
-                    )}
+                    ) }
                   </div>
                 );
-              })()}
+              })() }
             </>
-          )}
+          ) }
         </div>
       </div>
 
-      {/* Modal عرض صور الملاحظات المتعددة من القائمة الرئيسية */}
-      {noteImagesModalOpen && noteImagesModalProject && (
+      {/* Modal عرض صور الملاحظات المتعددة من القائمة الرئيسية */ }
+      { noteImagesModalOpen && noteImagesModalProject && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-y-auto" style={{ fontFamily: 'Cairo, sans-serif' }}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-y-auto" style={ { fontFamily: 'Cairo, sans-serif' } }>
             <div className="flex items-center justify-between mb-4 border-b border-gray-200 pb-3 px-4 pt-4">
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                 <ImageIcon className="w-5 h-5 text-indigo-600" />
-                صور الملاحظات - {noteImagesModalProject.project_name || noteImagesModalProject.donor_name || `#${noteImagesModalProject.id}`}
+                صور الملاحظات - { noteImagesModalProject.project_name || noteImagesModalProject.donor_name || `#${noteImagesModalProject.id}` }
               </h2>
               <button
-                onClick={() => {
+                onClick={ () => {
                   setNoteImagesModalOpen(false);
                   setNoteImagesModalProject(null);
                   setNoteImagesModalImages([]);
-                }}
+                } }
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -8813,7 +8854,7 @@ const ProjectsList = () => {
             </div>
 
             <div className="px-4 pb-4">
-              {noteImagesModalLoading ? (
+              { noteImagesModalLoading ? (
                 <div className="flex items-center justify-center py-10">
                   <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
                 </div>
@@ -8821,7 +8862,7 @@ const ProjectsList = () => {
                 <p className="text-center text-gray-500 py-8">لا توجد صور ملاحظات لهذا المشروع.</p>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {noteImagesModalImages.map((img, index) => {
+                  { noteImagesModalImages.map((img, index) => {
                     const path = img.image_url || img.image_path;
                     if (!path) return null;
 
@@ -8840,20 +8881,20 @@ const ProjectsList = () => {
 
                     return (
                       <div
-                        key={img.id || `${noteImagesModalProject.id}-${index}`}
+                        key={ img.id || `${noteImagesModalProject.id}-${index}` }
                         className="relative rounded-2xl border border-gray-200 overflow-hidden bg-gray-50"
                       >
                         <img
-                          src={finalUrl}
-                          alt={`صورة ملاحظة #${index + 1}`}
+                          src={ finalUrl }
+                          alt={ `صورة ملاحظة #${index + 1}` }
                           className="w-full h-40 object-cover"
                         />
                         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between px-2 py-1 bg-black/40 text-white text-xs">
                           <span className="px-2 py-0.5 bg-black/40 rounded-full">
-                            صورة ملاحظة #{index + 1}
+                            صورة ملاحظة #{ index + 1 }
                           </span>
                           <a
-                            href={finalUrl}
+                            href={ finalUrl }
                             download
                             className="px-2 py-0.5 rounded-full bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium"
                             title="تنزيل الصورة"
@@ -8863,83 +8904,83 @@ const ProjectsList = () => {
                         </div>
                       </div>
                     );
-                  })}
+                  }) }
                 </div>
-              )}
+              ) }
             </div>
           </div>
         </div>
-      )}
+      ) }
 
-      {/* Assign Project Modal */}
-      {selectedProject && assignModalOpen && (
+      {/* Assign Project Modal */ }
+      { selectedProject && assignModalOpen && (
         <AssignProjectModal
-          isOpen={assignModalOpen}
-          onClose={() => {
+          isOpen={ assignModalOpen }
+          onClose={ () => {
             setAssignModalOpen(false);
             setSelectedProject(null);
-          }}
-          projectId={selectedProject.id}
-          project={selectedProject}
-          onSuccess={() => {
+          } }
+          projectId={ selectedProject.id }
+          project={ selectedProject }
+          onSuccess={ () => {
             fetchProjects();
             setAssignModalOpen(false);
             setSelectedProject(null);
-          }}
+          } }
         />
-      )}
+      ) }
 
-      {/* Select Shelter Modal for Executed Coordinators */}
-      {selectedProject && selectShelterModalOpen && (
+      {/* Select Shelter Modal for Executed Coordinators */ }
+      { selectedProject && selectShelterModalOpen && (
         <SelectShelterModal
-          isOpen={selectShelterModalOpen}
-          projectId={selectedProject.id}
-          onClose={() => {
+          isOpen={ selectShelterModalOpen }
+          projectId={ selectedProject.id }
+          onClose={ () => {
             setSelectShelterModalOpen(false);
             setSelectedProject(null);
-          }}
-          onSuccess={() => {
+          } }
+          onSuccess={ () => {
             fetchProjects();
             setSelectShelterModalOpen(false);
             setSelectedProject(null);
-          }}
+          } }
         />
-      )}
+      ) }
 
-      {/* Add Orphans Modal for Orphan Sponsorship Projects */}
-      {selectedProject && addOrphansModalOpen && (
+      {/* Add Orphans Modal for Orphan Sponsorship Projects */ }
+      { selectedProject && addOrphansModalOpen && (
         <AddOrphansModal
-          isOpen={addOrphansModalOpen}
-          onClose={() => {
+          isOpen={ addOrphansModalOpen }
+          onClose={ () => {
             setAddOrphansModalOpen(false);
             setSelectedProject(null);
-          }}
-          projectId={selectedProject.id}
-          project={selectedProject}
-          onSuccess={() => {
+          } }
+          projectId={ selectedProject.id }
+          project={ selectedProject }
+          onSuccess={ () => {
             fetchProjects();
             // ✅ إبطال الكاش
             window.dispatchEvent(new CustomEvent('cache-invalidated', { detail: { cacheKey: 'project-proposals' } }));
-          }}
+          } }
         />
-      )}
+      ) }
 
-      {/* ✅ Modal تحديث حالة التنفيذ (تم التنفيذ / تأجيل) */}
-      {showExecutionStatusModal && selectedProjectForStatusUpdate && (
+      {/* ✅ Modal تحديث حالة التنفيذ (تم التنفيذ / تأجيل) */ }
+      { showExecutionStatusModal && selectedProjectForStatusUpdate && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" style={{ fontFamily: 'Cairo, sans-serif' }}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" style={ { fontFamily: 'Cairo, sans-serif' } }>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-gray-800 flex items-center">
                 <CheckCircle className="w-5 h-5 ml-2 text-purple-500" />
                 تحديث حالة المشروع
               </h2>
               <button
-                onClick={() => {
+                onClick={ () => {
                   setShowExecutionStatusModal(false);
                   setSelectedProjectForStatusUpdate(null);
                   setExecutionStatusAction(null);
                   setPostponementReason('');
-                }}
+                } }
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -8948,25 +8989,25 @@ const ProjectsList = () => {
 
             <div className="mb-4">
               <p className="text-sm text-gray-600 mb-2">
-                المشروع: <span className="font-semibold text-gray-800">{selectedProjectForStatusUpdate.project_name || selectedProjectForStatusUpdate.donor_name || 'غير محدد'}</span>
+                المشروع: <span className="font-semibold text-gray-800">{ selectedProjectForStatusUpdate.project_name || selectedProjectForStatusUpdate.donor_name || 'غير محدد' }</span>
               </p>
               <p className="text-sm text-gray-600">
-                الحالة الحالية: <span className="font-semibold text-purple-600">{selectedProjectForStatusUpdate.status}</span>
+                الحالة الحالية: <span className="font-semibold text-purple-600">{ selectedProjectForStatusUpdate.status }</span>
               </p>
             </div>
 
-            {!executionStatusAction ? (
+            { !executionStatusAction ? (
               <div className="space-y-3 mb-6">
                 <p className="text-sm font-medium text-gray-700 mb-3">اختر الإجراء المطلوب:</p>
                 <button
-                  onClick={() => setExecutionStatusAction('completed')}
+                  onClick={ () => setExecutionStatusAction('completed') }
                   className="w-full px-4 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-colors"
                 >
                   <CheckCircle className="w-5 h-5" />
                   تم التنفيذ
                 </button>
                 <button
-                  onClick={() => setExecutionStatusAction('postpone')}
+                  onClick={ () => setExecutionStatusAction('postpone') }
                   className="w-full px-4 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-colors"
                 >
                   <Pause className="w-5 h-5" />
@@ -8980,18 +9021,18 @@ const ProjectsList = () => {
                 </p>
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => setExecutionStatusAction(null)}
-                    disabled={updatingStatus}
+                    onClick={ () => setExecutionStatusAction(null) }
+                    disabled={ updatingStatus }
                     className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors disabled:opacity-50"
                   >
                     رجوع
                   </button>
                   <button
-                    onClick={handleCompleteExecution}
-                    disabled={updatingStatus}
+                    onClick={ handleCompleteExecution }
+                    disabled={ updatingStatus }
                     className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {updatingStatus ? (
+                    { updatingStatus ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white ml-2"></div>
                         جاري التحديث...
@@ -9001,7 +9042,7 @@ const ProjectsList = () => {
                         <CheckCircle className="w-4 h-4 ml-2" />
                         تأكيد
                       </>
-                    )}
+                    ) }
                   </button>
                 </div>
               </div>
@@ -9012,10 +9053,10 @@ const ProjectsList = () => {
                     سبب التأجيل <span className="text-red-500">*</span>
                   </label>
                   <textarea
-                    value={postponementReason}
-                    onChange={(e) => setPostponementReason(e.target.value)}
+                    value={ postponementReason }
+                    onChange={ (e) => setPostponementReason(e.target.value) }
                     placeholder="أدخل سبب تأجيل المشروع..."
-                    rows={4}
+                    rows={ 4 }
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none resize-none"
                   />
                   <p className="text-xs text-gray-500 mt-1">
@@ -9024,21 +9065,21 @@ const ProjectsList = () => {
                 </div>
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => {
+                    onClick={ () => {
                       setExecutionStatusAction(null);
                       setPostponementReason('');
-                    }}
-                    disabled={isPostponing}
+                    } }
+                    disabled={ isPostponing }
                     className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors disabled:opacity-50"
                   >
                     رجوع
                   </button>
                   <button
-                    onClick={handlePostponeFromStatusModal}
-                    disabled={isPostponing || !postponementReason.trim()}
+                    onClick={ handlePostponeFromStatusModal }
+                    disabled={ isPostponing || !postponementReason.trim() }
                     className="flex-1 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {isPostponing ? (
+                    { isPostponing ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white ml-2"></div>
                         جاري التأجيل...
@@ -9048,17 +9089,17 @@ const ProjectsList = () => {
                         <Pause className="w-4 h-4 ml-2" />
                         تأجيل المشروع
                       </>
-                    )}
+                    ) }
                   </button>
                 </div>
               </div>
-            )}
+            ) }
           </div>
         </div>
-      )}
+      ) }
 
-      {/* Modal تأجيل المشروع (القديم - للاستخدام من أماكن أخرى) */}
-      {showPostponeModal && (
+      {/* Modal تأجيل المشروع (القديم - للاستخدام من أماكن أخرى) */ }
+      { showPostponeModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
             <div className="flex items-center justify-between mb-4">
@@ -9067,11 +9108,11 @@ const ProjectsList = () => {
                 تأجيل المشروع
               </h2>
               <button
-                onClick={() => {
+                onClick={ () => {
                   setShowPostponeModal(false);
                   setPostponementReason('');
                   setPostponingProjectId(null);
-                }}
+                } }
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -9083,10 +9124,10 @@ const ProjectsList = () => {
                 سبب التأجيل <span className="text-red-500">*</span>
               </label>
               <textarea
-                value={postponementReason}
-                onChange={(e) => setPostponementReason(e.target.value)}
+                value={ postponementReason }
+                onChange={ (e) => setPostponementReason(e.target.value) }
                 placeholder="أدخل سبب تأجيل المشروع..."
-                rows={4}
+                rows={ 4 }
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none resize-none"
               />
               <p className="text-xs text-gray-500 mt-1">
@@ -9096,22 +9137,22 @@ const ProjectsList = () => {
 
             <div className="flex items-center gap-3">
               <button
-                onClick={() => {
+                onClick={ () => {
                   setShowPostponeModal(false);
                   setPostponementReason('');
                   setPostponingProjectId(null);
-                }}
-                disabled={isPostponing}
+                } }
+                disabled={ isPostponing }
                 className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors disabled:opacity-50"
               >
                 إلغاء
               </button>
               <button
-                onClick={handlePostponeProject}
-                disabled={isPostponing || !postponementReason.trim()}
+                onClick={ handlePostponeProject }
+                disabled={ isPostponing || !postponementReason.trim() }
                 className="flex-1 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isPostponing ? (
+                { isPostponing ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white ml-2"></div>
                     جاري التأجيل...
@@ -9121,19 +9162,19 @@ const ProjectsList = () => {
                     <Pause className="w-4 h-4 ml-2" />
                     تأجيل المشروع
                   </>
-                )}
+                ) }
               </button>
             </div>
           </div>
         </div>
-      )}
+      ) }
 
-      {/* Export Filter Modal */}
-      {isExportFilterModalOpen && (
+      {/* Export Filter Modal */ }
+      { isExportFilterModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" dir="rtl">
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => !isDownloading && setIsExportFilterModalOpen(false)}
+            onClick={ () => !isDownloading && setIsExportFilterModalOpen(false) }
           />
           <div className="relative bg-white rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between mb-6">
@@ -9142,8 +9183,8 @@ const ProjectsList = () => {
                 تصدير ملف Excel
               </h3>
               <button
-                onClick={() => !isDownloading && setIsExportFilterModalOpen(false)}
-                disabled={isDownloading}
+                onClick={ () => !isDownloading && setIsExportFilterModalOpen(false) }
+                disabled={ isDownloading }
                 className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
               >
                 <X className="w-6 h-6" />
@@ -9151,20 +9192,20 @@ const ProjectsList = () => {
             </div>
 
             <div className="space-y-4">
-              {/* ✅ حالة المشروع - اختيار متعدد في Export */}
-              <div className="relative" ref={exportStatusDropdownRef}>
+              {/* ✅ حالة المشروع - اختيار متعدد في Export */ }
+              <div className="relative" ref={ exportStatusDropdownRef }>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   حالة المشروع
                 </label>
                 <div className="relative">
                   <button
                     type="button"
-                    onClick={() => setShowExportStatusDropdown(!showExportStatusDropdown)}
-                    disabled={isDownloading}
+                    onClick={ () => setShowExportStatusDropdown(!showExportStatusDropdown) }
+                    disabled={ isDownloading }
                     className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50 flex items-center justify-between"
                   >
                     <span className="text-gray-700">
-                      {Array.isArray(exportFilters.status) && exportFilters.status.length > 0
+                      { Array.isArray(exportFilters.status) && exportFilters.status.length > 0
                         ? `${exportFilters.status.length} محدد`
                         : 'جميع الحالات'
                       }
@@ -9172,55 +9213,55 @@ const ProjectsList = () => {
                     <ChevronDown className="w-4 h-4 text-gray-500" />
                   </button>
 
-                  {showExportStatusDropdown && !isDownloading && (
+                  { showExportStatusDropdown && !isDownloading && (
                     <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-xl shadow-lg max-h-60 overflow-y-auto">
                       <div className="p-2">
                         <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={Array.isArray(exportFilters.status) && exportFilters.status.length === 0}
-                            onChange={() => setExportFilters({ ...exportFilters, status: [] })}
+                            checked={ Array.isArray(exportFilters.status) && exportFilters.status.length === 0 }
+                            onChange={ () => setExportFilters({ ...exportFilters, status: [] }) }
                             className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
                           />
                           <span className="text-sm text-gray-700 font-medium">جميع الحالات</span>
                         </label>
-                        {PROJECT_STATUSES.map((status) => (
-                          <label key={status} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
+                        { PROJECT_STATUSES.map((status) => (
+                          <label key={ status } className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={Array.isArray(exportFilters.status) && exportFilters.status.includes(status)}
-                              onChange={(e) => {
+                              checked={ Array.isArray(exportFilters.status) && exportFilters.status.includes(status) }
+                              onChange={ (e) => {
                                 const currentStatuses = Array.isArray(exportFilters.status) ? exportFilters.status : [];
                                 const newStatuses = e.target.checked
                                   ? [...currentStatuses, status]
                                   : currentStatuses.filter(s => s !== status);
                                 setExportFilters({ ...exportFilters, status: newStatuses });
-                              }}
+                              } }
                               className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
                             />
-                            <span className="text-sm text-gray-700">{status}</span>
+                            <span className="text-sm text-gray-700">{ status }</span>
                           </label>
-                        ))}
+                        )) }
                       </div>
                     </div>
-                  )}
+                  ) }
                 </div>
               </div>
 
-              {/* ✅ نوع المشروع - اختيار متعدد في Export */}
-              <div className="relative" ref={exportProjectTypeDropdownRef}>
+              {/* ✅ نوع المشروع - اختيار متعدد في Export */ }
+              <div className="relative" ref={ exportProjectTypeDropdownRef }>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   نوع المشروع
                 </label>
                 <div className="relative">
                   <button
                     type="button"
-                    onClick={() => setShowExportProjectTypeDropdown(!showExportProjectTypeDropdown)}
-                    disabled={isDownloading}
+                    onClick={ () => setShowExportProjectTypeDropdown(!showExportProjectTypeDropdown) }
+                    disabled={ isDownloading }
                     className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50 flex items-center justify-between"
                   >
                     <span className="text-gray-700">
-                      {Array.isArray(exportFilters.project_type) && exportFilters.project_type.length > 0
+                      { Array.isArray(exportFilters.project_type) && exportFilters.project_type.length > 0
                         ? `${exportFilters.project_type.length} محدد`
                         : 'جميع الأنواع'
                       }
@@ -9228,38 +9269,38 @@ const ProjectsList = () => {
                     <ChevronDown className="w-4 h-4 text-gray-500" />
                   </button>
 
-                  {showExportProjectTypeDropdown && !isDownloading && (
+                  { showExportProjectTypeDropdown && !isDownloading && (
                     <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-xl shadow-lg max-h-60 overflow-y-auto">
                       <div className="p-2">
                         <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={Array.isArray(exportFilters.project_type) && exportFilters.project_type.length === 0}
-                            onChange={() => setExportFilters({ ...exportFilters, project_type: [] })}
+                            checked={ Array.isArray(exportFilters.project_type) && exportFilters.project_type.length === 0 }
+                            onChange={ () => setExportFilters({ ...exportFilters, project_type: [] }) }
                             className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
                           />
                           <span className="text-sm text-gray-700 font-medium">جميع الأنواع</span>
                         </label>
-                        {projectTypes.map((type) => (
-                          <label key={type} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
+                        { projectTypes.map((type) => (
+                          <label key={ type } className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={Array.isArray(exportFilters.project_type) && exportFilters.project_type.includes(type)}
-                              onChange={(e) => {
+                              checked={ Array.isArray(exportFilters.project_type) && exportFilters.project_type.includes(type) }
+                              onChange={ (e) => {
                                 const currentTypes = Array.isArray(exportFilters.project_type) ? exportFilters.project_type : [];
                                 const newTypes = e.target.checked
                                   ? [...currentTypes, type]
                                   : currentTypes.filter(t => t !== type);
                                 setExportFilters({ ...exportFilters, project_type: newTypes });
-                              }}
+                              } }
                               className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
                             />
-                            <span className="text-sm text-gray-700">{type}</span>
+                            <span className="text-sm text-gray-700">{ type }</span>
                           </label>
-                        ))}
+                        )) }
                       </div>
                     </div>
-                  )}
+                  ) }
                 </div>
               </div>
 
@@ -9272,9 +9313,9 @@ const ProjectsList = () => {
                     <label className="block text-xs text-gray-600 mb-1">من تاريخ</label>
                     <input
                       type="date"
-                      value={exportFilters.startDate}
-                      onChange={(e) => setExportFilters({ ...exportFilters, startDate: e.target.value })}
-                      disabled={isDownloading}
+                      value={ exportFilters.startDate }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, startDate: e.target.value }) }
+                      disabled={ isDownloading }
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     />
                   </div>
@@ -9282,16 +9323,16 @@ const ProjectsList = () => {
                     <label className="block text-xs text-gray-600 mb-1">إلى تاريخ</label>
                     <input
                       type="date"
-                      value={exportFilters.endDate}
-                      onChange={(e) => setExportFilters({ ...exportFilters, endDate: e.target.value })}
-                      disabled={isDownloading}
+                      value={ exportFilters.endDate }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, endDate: e.target.value }) }
+                      disabled={ isDownloading }
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* ✅ الفلاتر المتقدمة */}
+              {/* ✅ الفلاتر المتقدمة */ }
               <div className="border-t-2 border-gray-200 pt-4">
                 <h4 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Filter className="w-5 h-5 text-purple-600" />
@@ -9299,133 +9340,133 @@ const ProjectsList = () => {
                 </h4>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* الباحث */}
+                  {/* الباحث */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       الباحث
                     </label>
                     <select
-                      value={exportFilters.researcher_id}
-                      onChange={(e) => setExportFilters({ ...exportFilters, researcher_id: e.target.value })}
-                      disabled={isDownloading || loadingFilterData}
+                      value={ exportFilters.researcher_id }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, researcher_id: e.target.value }) }
+                      disabled={ isDownloading || loadingFilterData }
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     >
                       <option value="">جميع الباحثين</option>
-                      {researchers.map(researcher => (
-                        <option key={researcher.id || researcher._id} value={researcher.id || researcher._id}>
-                          {researcher.name || researcher.full_name || '-'}
+                      { researchers.map(researcher => (
+                        <option key={ researcher.id || researcher._id } value={ researcher.id || researcher._id }>
+                          { researcher.name || researcher.full_name || '-' }
                         </option>
-                      ))}
+                      )) }
                     </select>
                   </div>
 
-                  {/* المصور */}
+                  {/* المصور */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       المصور
                     </label>
                     <select
-                      value={exportFilters.photographer_id}
-                      onChange={(e) => setExportFilters({ ...exportFilters, photographer_id: e.target.value })}
-                      disabled={isDownloading || loadingFilterData}
+                      value={ exportFilters.photographer_id }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, photographer_id: e.target.value }) }
+                      disabled={ isDownloading || loadingFilterData }
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     >
                       <option value="">جميع المصورين</option>
-                      {photographers.map(photographer => (
-                        <option key={photographer.id || photographer._id} value={photographer.id || photographer._id}>
-                          {photographer.name || photographer.full_name || '-'}
+                      { photographers.map(photographer => (
+                        <option key={ photographer.id || photographer._id } value={ photographer.id || photographer._id }>
+                          { photographer.name || photographer.full_name || '-' }
                         </option>
-                      ))}
+                      )) }
                     </select>
                   </div>
 
-                  {/* المخيم */}
+                  {/* المخيم */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       المخيم
                     </label>
                     <select
-                      value={exportFilters.shelter_id}
-                      onChange={(e) => setExportFilters({ ...exportFilters, shelter_id: e.target.value })}
-                      disabled={isDownloading || loadingFilterData}
+                      value={ exportFilters.shelter_id }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, shelter_id: e.target.value }) }
+                      disabled={ isDownloading || loadingFilterData }
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     >
                       <option value="">جميع المخيمات</option>
-                      {shelters.map(shelter => (
-                        <option key={shelter.id || shelter._id} value={shelter.id || shelter._id}>
-                          {shelter.camp_name || shelter.name || shelter.manager_id_number || '-'}
+                      { shelters.map(shelter => (
+                        <option key={ shelter.id || shelter._id } value={ shelter.id || shelter._id }>
+                          { shelter.camp_name || shelter.name || shelter.manager_id_number || '-' }
                         </option>
-                      ))}
+                      )) }
                     </select>
                   </div>
 
-                  {/* المحافظة */}
+                  {/* المحافظة */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       المحافظة
                     </label>
                     <select
-                      value={exportFilters.governorate}
-                      onChange={(e) => setExportFilters({ ...exportFilters, governorate: e.target.value, district: '' })}
-                      disabled={isDownloading || loadingFilterData}
+                      value={ exportFilters.governorate }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, governorate: e.target.value, district: '' }) }
+                      disabled={ isDownloading || loadingFilterData }
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     >
                       <option value="">جميع المحافظات</option>
-                      {governorates.map(gov => (
-                        <option key={gov} value={gov}>{gov}</option>
-                      ))}
+                      { governorates.map(gov => (
+                        <option key={ gov } value={ gov }>{ gov }</option>
+                      )) }
                     </select>
                   </div>
 
-                  {/* المنطقة */}
+                  {/* المنطقة */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       المنطقة
                     </label>
                     <select
-                      value={exportFilters.district}
-                      onChange={(e) => setExportFilters({ ...exportFilters, district: e.target.value })}
-                      disabled={isDownloading || loadingFilterData || !exportFilters.governorate}
+                      value={ exportFilters.district }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, district: e.target.value }) }
+                      disabled={ isDownloading || loadingFilterData || !exportFilters.governorate }
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     >
                       <option value="">جميع المناطق</option>
-                      {districts.map(district => (
-                        <option key={district} value={district}>{district}</option>
-                      ))}
+                      { districts.map(district => (
+                        <option key={ district } value={ district }>{ district }</option>
+                      )) }
                     </select>
                   </div>
 
-                  {/* اسم المتبرع */}
+                  {/* اسم المتبرع */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       اسم المتبرع
                     </label>
                     <input
                       type="text"
-                      value={exportFilters.donor_name}
-                      onChange={(e) => setExportFilters({ ...exportFilters, donor_name: e.target.value })}
-                      disabled={isDownloading}
+                      value={ exportFilters.donor_name }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, donor_name: e.target.value }) }
+                      disabled={ isDownloading }
                       placeholder="ابحث عن اسم المتبرع..."
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     />
                   </div>
 
-                  {/* كود المتبرع */}
+                  {/* كود المتبرع */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       كود المتبرع
                     </label>
                     <input
                       type="text"
-                      value={exportFilters.donor_code}
-                      onChange={(e) => setExportFilters({ ...exportFilters, donor_code: e.target.value })}
-                      disabled={isDownloading}
+                      value={ exportFilters.donor_code }
+                      onChange={ (e) => setExportFilters({ ...exportFilters, donor_code: e.target.value }) }
+                      disabled={ isDownloading }
                       placeholder="ابحث عن كود المتبرع..."
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                     />
                   </div>
 
-                  {/* نطاق الكمية */}
+                  {/* نطاق الكمية */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       نطاق الكمية
@@ -9434,25 +9475,25 @@ const ProjectsList = () => {
                       <input
                         type="number"
                         min="0"
-                        value={exportFilters.quantity_min}
-                        onChange={(e) => setExportFilters({ ...exportFilters, quantity_min: e.target.value })}
-                        disabled={isDownloading}
+                        value={ exportFilters.quantity_min }
+                        onChange={ (e) => setExportFilters({ ...exportFilters, quantity_min: e.target.value }) }
+                        disabled={ isDownloading }
                         placeholder="الحد الأدنى"
                         className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                       />
                       <input
                         type="number"
                         min="0"
-                        value={exportFilters.quantity_max}
-                        onChange={(e) => setExportFilters({ ...exportFilters, quantity_max: e.target.value })}
-                        disabled={isDownloading}
+                        value={ exportFilters.quantity_max }
+                        onChange={ (e) => setExportFilters({ ...exportFilters, quantity_max: e.target.value }) }
+                        disabled={ isDownloading }
                         placeholder="الحد الأقصى"
                         className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                       />
                     </div>
                   </div>
 
-                  {/* نطاق التكلفة */}
+                  {/* نطاق التكلفة */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       نطاق التكلفة
@@ -9462,9 +9503,9 @@ const ProjectsList = () => {
                         type="number"
                         min="0"
                         step="0.01"
-                        value={exportFilters.cost_min}
-                        onChange={(e) => setExportFilters({ ...exportFilters, cost_min: e.target.value })}
-                        disabled={isDownloading}
+                        value={ exportFilters.cost_min }
+                        onChange={ (e) => setExportFilters({ ...exportFilters, cost_min: e.target.value }) }
+                        disabled={ isDownloading }
                         placeholder="الحد الأدنى"
                         className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                       />
@@ -9472,16 +9513,16 @@ const ProjectsList = () => {
                         type="number"
                         min="0"
                         step="0.01"
-                        value={exportFilters.cost_max}
-                        onChange={(e) => setExportFilters({ ...exportFilters, cost_max: e.target.value })}
-                        disabled={isDownloading}
+                        value={ exportFilters.cost_max }
+                        onChange={ (e) => setExportFilters({ ...exportFilters, cost_max: e.target.value }) }
+                        disabled={ isDownloading }
                         placeholder="الحد الأقصى"
                         className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                       />
                     </div>
                   </div>
 
-                  {/* تاريخ الإنشاء */}
+                  {/* تاريخ الإنشاء */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       تاريخ الإنشاء
@@ -9489,22 +9530,22 @@ const ProjectsList = () => {
                     <div className="grid grid-cols-2 gap-2">
                       <input
                         type="date"
-                        value={exportFilters.created_at_start}
-                        onChange={(e) => setExportFilters({ ...exportFilters, created_at_start: e.target.value })}
-                        disabled={isDownloading}
+                        value={ exportFilters.created_at_start }
+                        onChange={ (e) => setExportFilters({ ...exportFilters, created_at_start: e.target.value }) }
+                        disabled={ isDownloading }
                         className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                       />
                       <input
                         type="date"
-                        value={exportFilters.created_at_end}
-                        onChange={(e) => setExportFilters({ ...exportFilters, created_at_end: e.target.value })}
-                        disabled={isDownloading}
+                        value={ exportFilters.created_at_end }
+                        onChange={ (e) => setExportFilters({ ...exportFilters, created_at_end: e.target.value }) }
+                        disabled={ isDownloading }
                         className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                       />
                     </div>
                   </div>
 
-                  {/* تاريخ التحديث */}
+                  {/* تاريخ التحديث */ }
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       تاريخ التحديث
@@ -9512,16 +9553,16 @@ const ProjectsList = () => {
                     <div className="grid grid-cols-2 gap-2">
                       <input
                         type="date"
-                        value={exportFilters.updated_at_start}
-                        onChange={(e) => setExportFilters({ ...exportFilters, updated_at_start: e.target.value })}
-                        disabled={isDownloading}
+                        value={ exportFilters.updated_at_start }
+                        onChange={ (e) => setExportFilters({ ...exportFilters, updated_at_start: e.target.value }) }
+                        disabled={ isDownloading }
                         className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                       />
                       <input
                         type="date"
-                        value={exportFilters.updated_at_end}
-                        onChange={(e) => setExportFilters({ ...exportFilters, updated_at_end: e.target.value })}
-                        disabled={isDownloading}
+                        value={ exportFilters.updated_at_end }
+                        onChange={ (e) => setExportFilters({ ...exportFilters, updated_at_end: e.target.value }) }
+                        disabled={ isDownloading }
                         className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-right transition-all outline-none focus:border-green-400 focus:bg-white focus:shadow-lg disabled:opacity-50"
                       />
                     </div>
@@ -9529,7 +9570,7 @@ const ProjectsList = () => {
                 </div>
               </div>
 
-              {/* ✅ اختيار الأعمدة */}
+              {/* ✅ اختيار الأعمدة */ }
               <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-sm font-semibold text-blue-800">
@@ -9538,16 +9579,16 @@ const ProjectsList = () => {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => toggleAllColumns(true)}
-                      disabled={isDownloading}
+                      onClick={ () => toggleAllColumns(true) }
+                      disabled={ isDownloading }
                       className="px-3 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-medium transition-colors disabled:opacity-50"
                     >
                       تحديد الكل
                     </button>
                     <button
                       type="button"
-                      onClick={() => toggleAllColumns(false)}
-                      disabled={isDownloading}
+                      onClick={ () => toggleAllColumns(false) }
+                      disabled={ isDownloading }
                       className="px-3 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-medium transition-colors disabled:opacity-50"
                     >
                       إلغاء الكل
@@ -9555,33 +9596,33 @@ const ProjectsList = () => {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-                  {availableColumns.map(column => (
+                  { availableColumns.map(column => (
                     <label
-                      key={column.key}
+                      key={ column.key }
                       className="flex items-center gap-2 p-2 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors"
-                      onClick={(e) => {
+                      onClick={ (e) => {
                         // ✅ منع propagation إذا تم النقر على الـ checkbox مباشرة
                         if (e.target.type === 'checkbox') {
                           e.stopPropagation();
                         }
-                      }}
+                      } }
                     >
                       <input
                         type="checkbox"
-                        checked={selectedColumns.includes(column.key)}
-                        onChange={(e) => {
+                        checked={ selectedColumns.includes(column.key) }
+                        onChange={ (e) => {
                           e.stopPropagation();
                           toggleColumn(column.key);
-                        }}
-                        disabled={isDownloading}
+                        } }
+                        disabled={ isDownloading }
                         className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
                       />
-                      <span className="text-xs text-gray-700">{column.label}</span>
+                      <span className="text-xs text-gray-700">{ column.label }</span>
                     </label>
-                  ))}
+                  )) }
                 </div>
                 <p className="text-xs text-blue-600 mt-2">
-                  تم اختيار {selectedColumns.length} من {availableColumns.length} عمود
+                  تم اختيار { selectedColumns.length } من { availableColumns.length } عمود
                 </p>
               </div>
 
@@ -9590,123 +9631,123 @@ const ProjectsList = () => {
                   الفلاتر المحددة:
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {exportFilters.status && (
+                  { exportFilters.status && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      الحالة: {exportFilters.status}
+                      الحالة: { exportFilters.status }
                     </span>
-                  )}
-                  {Array.isArray(exportFilters.project_type) && exportFilters.project_type.length > 0 && (
+                  ) }
+                  { Array.isArray(exportFilters.project_type) && exportFilters.project_type.length > 0 && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      الأنواع: {exportFilters.project_type.join(', ')}
+                      الأنواع: { exportFilters.project_type.join(', ') }
                     </span>
-                  )}
-                  {exportFilters.startDate && (
+                  ) }
+                  { exportFilters.startDate && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      تنفيذ من: {exportFilters.startDate}
+                      تنفيذ من: { exportFilters.startDate }
                     </span>
-                  )}
-                  {exportFilters.endDate && (
+                  ) }
+                  { exportFilters.endDate && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      تنفيذ إلى: {exportFilters.endDate}
+                      تنفيذ إلى: { exportFilters.endDate }
                     </span>
-                  )}
-                  {exportFilters.researcher_id && (
+                  ) }
+                  { exportFilters.researcher_id && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      الباحث: {researchers.find(r => (r.id || r._id) == exportFilters.researcher_id)?.name || researchers.find(r => (r.id || r._id) == exportFilters.researcher_id)?.full_name || exportFilters.researcher_id}
+                      الباحث: { researchers.find(r => (r.id || r._id) == exportFilters.researcher_id)?.name || researchers.find(r => (r.id || r._id) == exportFilters.researcher_id)?.full_name || exportFilters.researcher_id }
                     </span>
-                  )}
-                  {exportFilters.photographer_id && (
+                  ) }
+                  { exportFilters.photographer_id && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      المصور: {photographers.find(p => (p.id || p._id) == exportFilters.photographer_id)?.name || exportFilters.photographer_id}
+                      المصور: { photographers.find(p => (p.id || p._id) == exportFilters.photographer_id)?.name || exportFilters.photographer_id }
                     </span>
-                  )}
-                  {exportFilters.shelter_id && (
+                  ) }
+                  { exportFilters.shelter_id && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      المخيم: {shelters.find(s => (s.id || s._id) == exportFilters.shelter_id)?.camp_name || exportFilters.shelter_id}
+                      المخيم: { shelters.find(s => (s.id || s._id) == exportFilters.shelter_id)?.camp_name || exportFilters.shelter_id }
                     </span>
-                  )}
-                  {exportFilters.governorate && (
+                  ) }
+                  { exportFilters.governorate && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      المحافظة: {exportFilters.governorate}
+                      المحافظة: { exportFilters.governorate }
                     </span>
-                  )}
-                  {exportFilters.district && (
+                  ) }
+                  { exportFilters.district && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      المنطقة: {exportFilters.district}
+                      المنطقة: { exportFilters.district }
                     </span>
-                  )}
-                  {exportFilters.donor_name && (
+                  ) }
+                  { exportFilters.donor_name && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      المتبرع: {exportFilters.donor_name}
+                      المتبرع: { exportFilters.donor_name }
                     </span>
-                  )}
-                  {exportFilters.donor_code && (
+                  ) }
+                  { exportFilters.donor_code && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      كود المتبرع: {exportFilters.donor_code}
+                      كود المتبرع: { exportFilters.donor_code }
                     </span>
-                  )}
-                  {(exportFilters.quantity_min || exportFilters.quantity_max) && (
+                  ) }
+                  { (exportFilters.quantity_min || exportFilters.quantity_max) && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      الكمية: {exportFilters.quantity_min || '0'} - {exportFilters.quantity_max || '∞'}
+                      الكمية: { exportFilters.quantity_min || '0' } - { exportFilters.quantity_max || '∞' }
                     </span>
-                  )}
-                  {(exportFilters.cost_min || exportFilters.cost_max) && (
+                  ) }
+                  { (exportFilters.cost_min || exportFilters.cost_max) && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      التكلفة: {exportFilters.cost_min || '0'} - {exportFilters.cost_max || '∞'}
+                      التكلفة: { exportFilters.cost_min || '0' } - { exportFilters.cost_max || '∞' }
                     </span>
-                  )}
-                  {exportFilters.created_at_start && (
+                  ) }
+                  { exportFilters.created_at_start && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      إنشاء من: {exportFilters.created_at_start}
+                      إنشاء من: { exportFilters.created_at_start }
                     </span>
-                  )}
-                  {exportFilters.created_at_end && (
+                  ) }
+                  { exportFilters.created_at_end && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      إنشاء إلى: {exportFilters.created_at_end}
+                      إنشاء إلى: { exportFilters.created_at_end }
                     </span>
-                  )}
-                  {exportFilters.updated_at_start && (
+                  ) }
+                  { exportFilters.updated_at_start && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      تحديث من: {exportFilters.updated_at_start}
+                      تحديث من: { exportFilters.updated_at_start }
                     </span>
-                  )}
-                  {exportFilters.updated_at_end && (
+                  ) }
+                  { exportFilters.updated_at_end && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-medium">
-                      تحديث إلى: {exportFilters.updated_at_end}
+                      تحديث إلى: { exportFilters.updated_at_end }
                     </span>
-                  )}
-                  {!exportFilters.status && (!Array.isArray(exportFilters.project_type) || exportFilters.project_type.length === 0) && !exportFilters.startDate && !exportFilters.endDate &&
+                  ) }
+                  { !exportFilters.status && (!Array.isArray(exportFilters.project_type) || exportFilters.project_type.length === 0) && !exportFilters.startDate && !exportFilters.endDate &&
                     !exportFilters.researcher_id && !exportFilters.photographer_id && !exportFilters.shelter_id &&
                     !exportFilters.governorate && !exportFilters.district && !exportFilters.donor_name &&
                     !exportFilters.donor_code && !exportFilters.quantity_min && !exportFilters.quantity_max &&
                     !exportFilters.cost_min && !exportFilters.cost_max && !exportFilters.created_at_start &&
                     !exportFilters.created_at_end && !exportFilters.updated_at_start && !exportFilters.updated_at_end && (
                       <span className="text-xs text-gray-500">لا توجد فلاتر محددة - سيتم تصدير جميع المشاريع</span>
-                    )}
+                    ) }
                 </div>
               </div>
 
               <div className="flex gap-3 pt-4">
                 <button
-                  onClick={resetExportFilters}
-                  disabled={isDownloading}
+                  onClick={ resetExportFilters }
+                  disabled={ isDownloading }
                   className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors disabled:opacity-50"
                 >
                   مسح الفلاتر
                 </button>
                 <button
-                  onClick={() => setIsExportFilterModalOpen(false)}
-                  disabled={isDownloading}
+                  onClick={ () => setIsExportFilterModalOpen(false) }
+                  disabled={ isDownloading }
                   className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors disabled:opacity-50"
                 >
                   إلغاء
                 </button>
                 <button
-                  onClick={handleConfirmExport}
-                  disabled={isDownloading}
+                  onClick={ handleConfirmExport }
+                  disabled={ isDownloading }
                   className="flex-1 px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isDownloading ? (
+                  { isDownloading ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                       جاري التصدير...
@@ -9716,32 +9757,32 @@ const ProjectsList = () => {
                       <Download className="w-4 h-4" />
                       تصدير
                     </>
-                  )}
+                  ) }
                 </button>
               </div>
             </div>
           </div>
         </div>
-      )}
+      ) }
 
-      {/* 🛒 Supply Modal - نافذة التسوق من المخزن */}
-      {supplyModalOpen && supplyProject && (
+      {/* 🛒 Supply Modal - نافذة التسوق من المخزن */ }
+      { supplyModalOpen && supplyProject && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Header */}
+            {/* Header */ }
             <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-xl font-bold flex items-center gap-2">
                     <ShoppingCart className="w-6 h-6" />
-                    {isOrphanSponsorCoordinator ? 'قيمة الكفالة' : 'التسوق من المخزن'}
+                    { isOrphanSponsorCoordinator ? 'قيمة الكفالة' : 'التسوق من المخزن' }
                   </h3>
                   <p className="text-indigo-100 text-sm mt-1">
-                    المشروع: {getProjectCode(supplyProject, supplyProject.id?.toString() || '---')}
+                    المشروع: { getProjectCode(supplyProject, supplyProject.id?.toString() || '---') }
                   </p>
                 </div>
                 <button
-                  onClick={() => {
+                  onClick={ () => {
                     setSupplyModalOpen(false);
                     setSupplyProject(null);
                     setCartItems([]);
@@ -9750,32 +9791,32 @@ const ProjectsList = () => {
                     setShowShekelModal(false);
                     setExchangeRate('');
                     setTransferDiscountPercentage(0);
-                  }}
+                  } }
                   className="text-white hover:text-indigo-200 transition-colors"
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
 
-              {/* معلومات المشروع */}
+              {/* معلومات المشروع */ }
               <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
-                {(() => {
+                { (() => {
                   const amountInfo = getAvailableAmountInfo(supplyProject);
                   const needsConversion = !supplyProject?.shekel_exchange_rate;
 
                   return (
                     <div className="bg-white/10 rounded-lg p-3">
-                      <span className="text-indigo-200">المبلغ المتاح للتوريد {amountInfo.currency === 'ILS' ? '(شيكل)' : '(دولار)'}:</span>
-                      {needsConversion ? (
+                      <span className="text-indigo-200">المبلغ المتاح للتوريد { amountInfo.currency === 'ILS' ? '(شيكل)' : '(دولار)' }:</span>
+                      { needsConversion ? (
                         <div className="mt-1">
                           <span className="block font-bold text-lg text-red-300">غير محول</span>
                           <button
-                            onClick={() => {
+                            onClick={ () => {
                               setIsEditingShekel(false);
                               setExchangeRate('');
                               setTransferDiscountPercentage(0);
                               setShowShekelModal(true);
-                            }}
+                            } }
                             className="mt-2 text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded transition-colors"
                           >
                             تحويل للشيكل
@@ -9783,45 +9824,45 @@ const ProjectsList = () => {
                         </div>
                       ) : (
                         <span className="block font-bold text-lg">
-                          {amountInfo.symbol}{parseFloat(String(amountInfo.amount || 0)).toFixed(2)}
+                          { amountInfo.symbol }{ parseFloat(String(amountInfo.amount || 0)).toFixed(2) }
                         </span>
-                      )}
+                      ) }
                     </div>
                   );
-                })()}
+                })() }
                 <div className="bg-white/10 rounded-lg p-3">
                   <span className="text-indigo-200">الحالة:</span>
-                  <span className="block font-bold">{supplyProject.status}</span>
+                  <span className="block font-bold">{ supplyProject.status }</span>
                 </div>
               </div>
             </div>
 
-            {/* Content */}
+            {/* Content */ }
             <div className="flex-1 overflow-y-auto p-6">
               <div className="grid grid-cols-2 gap-6">
-                {/* أصناف المخزن */}
+                {/* أصناف المخزن */ }
                 <div>
                   <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    📦 {isOrphanSponsorCoordinator ? 'قيمة الكفالة' : 'أصناف المخزن المتوفرة'}
+                    📦 { isOrphanSponsorCoordinator ? 'قيمة الكفالة' : 'أصناف المخزن المتوفرة' }
                   </h4>
 
-                  {/* حقل البحث - مخفي لمنسق الكفالة */}
-                  {!isOrphanSponsorCoordinator && (
+                  {/* حقل البحث - مخفي لمنسق الكفالة */ }
+                  { !isOrphanSponsorCoordinator && (
                     <div className="mb-3">
                       <div className="relative">
                         <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                         <input
                           type="text"
-                          value={warehouseSearchQuery}
-                          onChange={(e) => setWarehouseSearchQuery(e.target.value)}
+                          value={ warehouseSearchQuery }
+                          onChange={ (e) => setWarehouseSearchQuery(e.target.value) }
                           placeholder="ابحث عن صنف..."
                           className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                         />
                       </div>
                     </div>
-                  )}
+                  ) }
 
-                  {loadingWarehouse ? (
+                  { loadingWarehouse ? (
                     <div className="text-center py-8">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mx-auto"></div>
                       <p className="text-gray-500 mt-2">جاري التحميل...</p>
@@ -9840,7 +9881,7 @@ const ProjectsList = () => {
                     if (filteredItems.length === 0) {
                       return (
                         <div className="text-center py-8 text-gray-500">
-                          {warehouseSearchQuery.trim()
+                          { warehouseSearchQuery.trim()
                             ? `لا توجد أصناف تطابق "${warehouseSearchQuery}"`
                             : 'لا توجد أصناف في المخزن'
                           }
@@ -9850,15 +9891,15 @@ const ProjectsList = () => {
 
                     return (
                       <div className="space-y-2 max-h-96 overflow-y-auto">
-                        {filteredItems.map(item => (
-                          <div key={item.id} className="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
+                        { filteredItems.map(item => (
+                          <div key={ item.id } className="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
                             <div>
-                              <p className="font-medium text-gray-800">{item.item_name}</p>
+                              <p className="font-medium text-gray-800">{ item.item_name }</p>
                               <p className="text-xs text-gray-500">
-                                متوفر: {item.quantity_available} | السعر: {(() => {
+                                متوفر: { item.quantity_available } | السعر: { (() => {
                                   const amountInfo = getAvailableAmountInfo(supplyProject);
                                   return `${amountInfo.symbol}${parseFloat(item.unit_price || 0).toFixed(2)}`;
-                                })()}
+                                })() }
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
@@ -9868,96 +9909,96 @@ const ProjectsList = () => {
                                 step="0.01"
                                 placeholder="الكمية"
                                 className="w-20 px-2 py-1 border rounded text-sm"
-                                id={`qty-${item.id}`}
+                                id={ `qty-${item.id}` }
                               />
                               <button
-                                onClick={() => {
+                                onClick={ () => {
                                   const qty = document.getElementById(`qty-${item.id}`).value;
                                   handleAddToCart(item, qty);
-                                }}
-                                disabled={addingItem}
+                                } }
+                                disabled={ addingItem }
                                 className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded text-sm disabled:opacity-50"
                               >
                                 +
                               </button>
                             </div>
                           </div>
-                        ))}
+                        )) }
                       </div>
                     );
-                  })()}
+                  })() }
                 </div>
 
-                {/* السلة */}
+                {/* السلة */ }
                 <div>
                   <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    {isOrphanSponsorCoordinator ? 'قيمة الكفالة' : '  '}
+                    { isOrphanSponsorCoordinator ? 'قيمة الكفالة' : '  ' }
                   </h4>
-                  {cartItems.length === 0 ? (
+                  { cartItems.length === 0 ? (
                     <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
                       السلة فارغة
                     </div>
                   ) : (
                     <div className="space-y-2 max-h-96 overflow-y-auto">
-                      {cartItems.map(item => (
-                        <div key={item.id} className="bg-green-50 rounded-lg p-3 flex items-center justify-between">
+                      { cartItems.map(item => (
+                        <div key={ item.id } className="bg-green-50 rounded-lg p-3 flex items-center justify-between">
                           <div>
-                            <p className="font-medium text-gray-800">{item.warehouse_item?.item_name || item.item_name}</p>
+                            <p className="font-medium text-gray-800">{ item.warehouse_item?.item_name || item.item_name }</p>
                             <p className="text-xs text-gray-500">
-                              الكمية: {item.quantity_per_unit} × {item.unit_price} = {(() => {
+                              الكمية: { item.quantity_per_unit } × { item.unit_price } = { (() => {
                                 const amountInfo = getAvailableAmountInfo(supplyProject);
                                 return `${amountInfo.symbol}${parseFloat(item.total_price_per_unit || 0).toFixed(2)}`;
-                              })()}
+                              })() }
                             </p>
                           </div>
                           <button
-                            onClick={() => handleRemoveFromCart(item.id)}
+                            onClick={ () => handleRemoveFromCart(item.id) }
                             className="text-red-500 hover:text-red-700 p-1"
                           >
                             <X className="w-4 h-4" />
                           </button>
                         </div>
-                      ))}
+                      )) }
                     </div>
-                  )}
+                  ) }
 
-                  {/* ملخص */}
-                  {cartItems.length > 0 && (
+                  {/* ملخص */ }
+                  { cartItems.length > 0 && (
                     <div className="mt-4 bg-indigo-50 rounded-lg p-4 space-y-2">
                       <div className="flex justify-between text-sm">
                         <span>تكلفة الطرد الواحد:</span>
                         <span className="font-bold">
-                          {(() => {
+                          { (() => {
                             const amountInfo = getAvailableAmountInfo(supplyProject);
                             const unitCost = parseFloat(cartItems.reduce((sum, item) => sum + parseFloat(item.total_price_per_unit || 0), 0));
                             return `${amountInfo.symbol}${unitCost.toFixed(2)}`;
-                          })()}
+                          })() }
                         </span>
                       </div>
                       <div className="flex justify-between text-sm border-t pt-2">
                         <span>التكلفة الإجمالية:</span>
                         <span className="font-bold text-indigo-600">
-                          {(() => {
+                          { (() => {
                             const amountInfo = getAvailableAmountInfo(supplyProject);
                             const unitCost = parseFloat(cartItems.reduce((sum, item) => sum + parseFloat(item.total_price_per_unit || 0), 0));
                             const totalCost = unitCost * projectQuantity;
                             return `${amountInfo.symbol}${totalCost.toFixed(2)}`;
-                          })()}
+                          })() }
                         </span>
                       </div>
-                      {(() => {
+                      { (() => {
                         const amountInfo = getAvailableAmountInfo(supplyProject);
                         const availableAmount = parseFloat(amountInfo.amount || 0); // ✅ تحويل صريح إلى رقم
                         return (
                           <div className="flex justify-between text-sm">
-                            <span>المبلغ المتاح للتوريد {amountInfo.currency === 'ILS' ? '(شيكل)' : '(دولار)'}:</span>
+                            <span>المبلغ المتاح للتوريد { amountInfo.currency === 'ILS' ? '(شيكل)' : '(دولار)' }:</span>
                             <span className="font-bold text-green-600">
-                              {amountInfo.symbol}{availableAmount.toFixed(2)}
+                              { amountInfo.symbol }{ availableAmount.toFixed(2) }
                             </span>
                           </div>
                         );
-                      })()}
-                      {(() => {
+                      })() }
+                      { (() => {
                         const amountInfo = getAvailableAmountInfo(supplyProject);
                         const totalCost = cartItems.reduce((sum, item) => sum + parseFloat(item.total_price_per_unit || 0), 0);
                         const availableAmount = parseFloat(amountInfo.amount || 0); // ✅ تحويل صريح إلى رقم
@@ -9966,114 +10007,114 @@ const ProjectsList = () => {
                         // ✅ (الأصناف يجب أن تكون بالشيكل إذا كان المشروع محولاً للشيكل)
                         const surplus = availableAmount - totalCost;
                         return (
-                          <div className={`flex justify-between text-sm font-bold ${surplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            <span>{surplus >= 0 ? 'الفائض:' : 'العجز:'}</span>
-                            <span>{amountInfo.symbol}{Math.abs(surplus).toFixed(2)}</span>
+                          <div className={ `flex justify-between text-sm font-bold ${surplus >= 0 ? 'text-green-600' : 'text-red-600'}` }>
+                            <span>{ surplus >= 0 ? 'الفائض:' : 'العجز:' }</span>
+                            <span>{ amountInfo.symbol }{ Math.abs(surplus).toFixed(2) }</span>
                           </div>
                         );
-                      })()}
+                      })() }
                     </div>
-                  )}
+                  ) }
 
-                  {/* 📦 قسم الفائض - إجباري لتأكيد التوريد */}
-                  {surplusCategories.length > 0 && (
+                  {/* 📦 قسم الفائض - إجباري لتأكيد التوريد */ }
+                  { surplusCategories.length > 0 && (
                     <div className="mt-4 bg-white rounded-lg p-4 border border-gray-200">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         📦 قسم الفائض <span className="text-red-500">*</span>
-                        {isOrphanSponsorCoordinator && selectedSurplusCategoryId && (
+                        { isOrphanSponsorCoordinator && selectedSurplusCategoryId && (
                           <span className="text-green-600 text-xs mr-2">(تلقائي: كفالة الأيتام)</span>
-                        )}
+                        ) }
                       </label>
                       <select
-                        value={selectedSurplusCategoryId}
-                        onChange={(e) => setSelectedSurplusCategoryId(e.target.value)}
-                        disabled={isOrphanSponsorCoordinator && selectedSurplusCategoryId !== ''}
-                        className={`w-full px-3 py-2 border rounded-lg text-sm ${!selectedSurplusCategoryId || selectedSurplusCategoryId === ''
+                        value={ selectedSurplusCategoryId }
+                        onChange={ (e) => setSelectedSurplusCategoryId(e.target.value) }
+                        disabled={ isOrphanSponsorCoordinator && selectedSurplusCategoryId !== '' }
+                        className={ `w-full px-3 py-2 border rounded-lg text-sm ${!selectedSurplusCategoryId || selectedSurplusCategoryId === ''
                           ? 'border-red-300 bg-red-50'
                           : isOrphanSponsorCoordinator && selectedSurplusCategoryId !== ''
                             ? 'bg-green-50 border-green-300 text-green-700 cursor-not-allowed'
                             : 'border-gray-300'
-                          }`}
+                          }` }
                         required
                       >
                         <option value="">-- اختر قسم الفائض (مطلوب) --</option>
-                        {surplusCategories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
+                        { surplusCategories.map((category) => (
+                          <option key={ category.id } value={ category.id }>
+                            { category.name }
                           </option>
-                        ))}
+                        )) }
                       </select>
-                      {(!selectedSurplusCategoryId || selectedSurplusCategoryId === '') && (
+                      { (!selectedSurplusCategoryId || selectedSurplusCategoryId === '') && (
                         <p className="text-xs text-red-600 mt-1">
                           ⚠️ اختيار قسم الفائض إجباري لتأكيد التوريد
                         </p>
-                      )}
-                      {isOrphanSponsorCoordinator && selectedSurplusCategoryId && (
+                      ) }
+                      { isOrphanSponsorCoordinator && selectedSurplusCategoryId && (
                         <p className="text-xs text-green-600 mt-1">
                           ✓ تم اختيار "كفالة الأيتام" تلقائياً
                         </p>
-                      )}
+                      ) }
                     </div>
-                  )}
+                  ) }
                 </div>
               </div>
             </div>
 
-            {/* Footer */}
+            {/* Footer */ }
             <div className="border-t p-4 flex flex-col md:flex-row gap-3">
               <div className="flex-1 flex gap-3">
                 <button
-                  onClick={() => {
+                  onClick={ () => {
                     setSupplyModalOpen(false);
                     setSupplyProject(null);
                     setCartItems([]);
-                  }}
+                  } }
                   className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors"
                 >
                   إغلاق
                 </button>
-                {cartItems.length > 0 && (
+                { cartItems.length > 0 && (
                   <button
-                    onClick={handleConfirmSupply}
-                    disabled={confirmingSupply || !selectedSurplusCategoryId || selectedSurplusCategoryId === ''}
+                    onClick={ handleConfirmSupply }
+                    disabled={ confirmingSupply || !selectedSurplusCategoryId || selectedSurplusCategoryId === '' }
                     className="flex-1 px-4 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    title={!selectedSurplusCategoryId || selectedSurplusCategoryId === '' ? 'يرجى اختيار قسم الفائض أولاً' : ''}
+                    title={ !selectedSurplusCategoryId || selectedSurplusCategoryId === '' ? 'يرجى اختيار قسم الفائض أولاً' : '' }
                   >
-                    {confirmingSupply ? (
+                    { confirmingSupply ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                         جاري التأكيد...
                       </>
                     ) : (
                       'تأكيد التوريد'
-                    )}
+                    ) }
                   </button>
-                )}
+                ) }
               </div>
 
-              {/* ✅ زر إسناد باحث (مدير المشاريع فقط) بعد مرحلة "تم التوريد" */}
-              {isProjectManager && supplyProject && canAssignResearcherAfterSupply(supplyProject) && (
+              {/* ✅ زر إسناد باحث (مدير المشاريع فقط) بعد مرحلة "تم التوريد" */ }
+              { isProjectManager && supplyProject && canAssignResearcherAfterSupply(supplyProject) && (
                 <button
-                  onClick={() => {
+                  onClick={ () => {
                     setSupplyModalOpen(false);
                     setSelectedProject(supplyProject);
                     setAssignModalOpen(true);
-                  }}
+                  } }
                   className="w-full md:w-auto px-4 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 shadow-md transition-colors"
                   title="إسناد/تعديل باحث بعد التوريد"
                 >
                   <UserCheck className="w-4 h-4" />
                   إسناد باحث
                 </button>
-              )}
+              ) }
             </div>
           </div>
         </div>
-      )}
+      ) }
 
-      {/* Modal إضافة/تحديث عدد المستفيدين */}
-      {showBeneficiariesModal && selectedProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style={{ fontFamily: 'Cairo, sans-serif' }}>
+      {/* Modal إضافة/تحديث عدد المستفيدين */ }
+      { showBeneficiariesModal && selectedProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style={ { fontFamily: 'Cairo, sans-serif' } }>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
@@ -10081,11 +10122,11 @@ const ProjectsList = () => {
                 إضافة/تحديث عدد المستفيدين
               </h3>
               <button
-                onClick={() => {
+                onClick={ () => {
                   setShowBeneficiariesModal(false);
                   setBeneficiariesCount('');
                   setSelectedProject(null);
-                }}
+                } }
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <X className="w-6 h-6 text-gray-500" />
@@ -10093,30 +10134,30 @@ const ProjectsList = () => {
             </div>
 
             <div className="space-y-4">
-              {/* معلومات المشروع */}
+              {/* معلومات المشروع */ }
               <div className="bg-gray-50 rounded-xl p-4">
                 <p className="text-sm text-gray-600 mb-1">اسم المشروع</p>
                 <p className="text-lg font-semibold text-gray-800">
-                  {selectedProject.project_name || selectedProject.project_description || selectedProject.donor_name || '---'}
+                  { selectedProject.project_name || selectedProject.project_description || selectedProject.donor_name || '---' }
                 </p>
-                {getProjectCode(selectedProject, null) && (
+                { getProjectCode(selectedProject, null) && (
                   <p className="text-xs text-gray-500 mt-1">
-                    الكود: {getProjectCode(selectedProject)}
+                    الكود: { getProjectCode(selectedProject) }
                   </p>
-                )}
+                ) }
               </div>
 
-              {/* العدد الحالي للمستفيدين */}
-              {(selectedProject.beneficiaries_count || selectedProject.calculated_beneficiaries) && (
+              {/* العدد الحالي للمستفيدين */ }
+              { (selectedProject.beneficiaries_count || selectedProject.calculated_beneficiaries) && (
                 <div className="bg-blue-50 rounded-xl p-4 border-2 border-blue-200">
                   <p className="text-sm text-blue-600 mb-1">العدد الحالي للمستفيدين</p>
                   <p className="text-2xl font-bold text-blue-700">
-                    {(selectedProject.beneficiaries_count || selectedProject.calculated_beneficiaries || 0).toLocaleString('en-US')}
+                    { (selectedProject.beneficiaries_count || selectedProject.calculated_beneficiaries || 0).toLocaleString('en-US') }
                   </p>
                 </div>
-              )}
+              ) }
 
-              {/* حقل إدخال العدد */}
+              {/* حقل إدخال العدد */ }
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   عدد المستفيدين <span className="text-red-500">*</span>
@@ -10125,8 +10166,8 @@ const ProjectsList = () => {
                   type="number"
                   min="0"
                   step="1"
-                  value={beneficiariesCount}
-                  onChange={(e) => setBeneficiariesCount(e.target.value)}
+                  value={ beneficiariesCount }
+                  onChange={ (e) => setBeneficiariesCount(e.target.value) }
                   placeholder="أدخل عدد المستفيدين"
                   className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-lg"
                 />
@@ -10135,24 +10176,24 @@ const ProjectsList = () => {
                 </p>
               </div>
 
-              {/* الأزرار */}
+              {/* الأزرار */ }
               <div className="flex items-center justify-end gap-3 pt-4 border-t-2 border-gray-200">
                 <button
-                  onClick={() => {
+                  onClick={ () => {
                     setShowBeneficiariesModal(false);
                     setBeneficiariesCount('');
                     setSelectedProject(null);
-                  }}
+                  } }
                   className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors font-medium"
                 >
                   إلغاء
                 </button>
                 <button
-                  onClick={handleUpdateBeneficiaries}
-                  disabled={updatingBeneficiaries || !beneficiariesCount || parseInt(beneficiariesCount) < 0}
+                  onClick={ handleUpdateBeneficiaries }
+                  disabled={ updatingBeneficiaries || !beneficiariesCount || parseInt(beneficiariesCount) < 0 }
                   className="px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2"
                 >
-                  {updatingBeneficiaries ? (
+                  { updatingBeneficiaries ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                       جاري الحفظ...
@@ -10162,19 +10203,19 @@ const ProjectsList = () => {
                       <Users className="w-5 h-5" />
                       حفظ
                     </>
-                  )}
+                  ) }
                 </button>
               </div>
             </div>
           </div>
         </div>
-      )}
+      ) }
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Confirmation Dialog */ }
       <ConfirmDialog
-        isOpen={!!projectToDelete}
-        onClose={handleDeleteCancel}
-        onConfirm={handleDeleteConfirm}
+        isOpen={ !!projectToDelete }
+        onClose={ handleDeleteCancel }
+        onConfirm={ handleDeleteConfirm }
         title="تأكيد حذف المشروع"
         message={
           projectToDelete
@@ -10184,35 +10225,35 @@ const ProjectsList = () => {
         confirmText="حذف"
         cancelText="إلغاء"
         type="danger"
-        isLoading={!!deletingProject}
+        isLoading={ !!deletingProject }
       />
 
-      {/* ✅ Accept Modal (نفس وظيفة الإشعارات) */}
-      {acceptModalOpen && notificationToAccept && (
+      {/* ✅ Accept Modal (نفس وظيفة الإشعارات) */ }
+      { acceptModalOpen && notificationToAccept && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
             <div className="p-6">
-              {/* Header */}
+              {/* Header */ }
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                     <CheckCircle className="w-6 h-6 text-green-600" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-800" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>قبول المونتاج</h2>
+                    <h2 className="text-2xl font-bold text-gray-800" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>قبول المونتاج</h2>
                     <p className="text-sm text-gray-500 mt-1">تأكيد قبول المونتاج</p>
                   </div>
                 </div>
                 <button
-                  onClick={handleCloseAcceptModal}
+                  onClick={ handleCloseAcceptModal }
                   className="text-gray-400 hover:text-gray-600 transition-colors"
-                  disabled={accepting}
+                  disabled={ accepting }
                 >
                   <X className="w-6 h-6" />
                 </button>
               </div>
 
-              {/* Content */}
+              {/* Content */ }
               <div className="mb-6">
                 <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200 mb-4">
                   <p className="text-sm font-semibold text-green-800 mb-2">⚠️ ملاحظة مهمة:</p>
@@ -10227,45 +10268,45 @@ const ProjectsList = () => {
                 <div className="p-4 bg-gray-50 rounded-xl">
                   <p className="text-sm text-gray-600 mb-2">المشروع:</p>
                   <p className="font-semibold text-gray-800">
-                    {notificationToAccept.metadata?.project_name || notificationToAccept.metadata?.projectName || 'مشروع بدون اسم'}
+                    { notificationToAccept.metadata?.project_name || notificationToAccept.metadata?.projectName || 'مشروع بدون اسم' }
                   </p>
-                  {getProjectCode(notificationToAccept.metadata, null) && (
+                  { getProjectCode(notificationToAccept.metadata, null) && (
                     <p className="text-sm text-gray-500 mt-1">
-                      كود المشروع: {getProjectCode(notificationToAccept.metadata)}
+                      كود المشروع: { getProjectCode(notificationToAccept.metadata) }
                     </p>
-                  )}
+                  ) }
                 </div>
               </div>
 
-              {/* Actions */}
+              {/* Actions */ }
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
                 <button
                   type="button"
-                  onClick={handleCloseAcceptModal}
+                  onClick={ handleCloseAcceptModal }
                   className="px-6 py-3 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl font-medium transition-colors"
-                  disabled={accepting}
+                  disabled={ accepting }
                 >
                   إلغاء
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={ () => {
                     setSelectedNotification(notificationToAccept);
                     handleCloseAcceptModal();
                     handleOpenReplyModal(notificationToAccept);
-                  }}
+                  } }
                   className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
-                  disabled={accepting}
+                  disabled={ accepting }
                 >
                   <MessageSquare className="w-4 h-4" />
                   رفض المونتاج
                 </button>
                 <button
-                  onClick={handleAccept}
+                  onClick={ handleAccept }
                   className="px-8 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-medium hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  disabled={accepting}
+                  disabled={ accepting }
                 >
-                  {accepting ? (
+                  { accepting ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                       <span>جاري القبول...</span>
@@ -10275,23 +10316,23 @@ const ProjectsList = () => {
                       <CheckCircle className="w-5 h-5" />
                       <span>قبول المونتاج</span>
                     </>
-                  )}
+                  ) }
                 </button>
               </div>
             </div>
           </div>
         </div>
-      )}
+      ) }
 
-      {/* ✅ Reply Modal (نفس وظيفة الإشعارات) */}
-      {replyModalOpen && selectedNotification && (
+      {/* ✅ Reply Modal (نفس وظيفة الإشعارات) */ }
+      { replyModalOpen && selectedNotification && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-800" style={{ fontFamily: 'Cairo, sans-serif', fontWeight: 700 }}>رد على إشعار المونتاج</h2>
+                <h2 className="text-2xl font-bold text-gray-800" style={ { fontFamily: 'Cairo, sans-serif', fontWeight: 700 } }>رد على إشعار المونتاج</h2>
                 <button
-                  onClick={handleCloseReplyModal}
+                  onClick={ handleCloseReplyModal }
                   className="text-gray-400 hover:text-gray-600 transition-colors"
                 >
                   <X className="w-6 h-6" />
@@ -10300,19 +10341,19 @@ const ProjectsList = () => {
 
               <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                 <p className="text-sm text-gray-600 mb-2">الإشعار:</p>
-                <p className="font-semibold text-gray-800">{selectedNotification.title}</p>
-                <p className="text-sm text-gray-600 mt-2">{selectedNotification.message}</p>
+                <p className="font-semibold text-gray-800">{ selectedNotification.title }</p>
+                <p className="text-sm text-gray-600 mt-2">{ selectedNotification.message }</p>
               </div>
 
-              <form onSubmit={handleReplySubmit} className="space-y-4">
+              <form onSubmit={ handleReplySubmit } className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     الرسالة <span className="text-red-500">*</span>
                   </label>
                   <textarea
-                    value={replyForm.message}
-                    onChange={(e) => setReplyForm({ ...replyForm, message: e.target.value })}
-                    rows={4}
+                    value={ replyForm.message }
+                    onChange={ (e) => setReplyForm({ ...replyForm, message: e.target.value }) }
+                    rows={ 4 }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                     placeholder="أدخل الرسالة التي تريد إرسالها لقسم الإعلام..."
                     required
@@ -10324,9 +10365,9 @@ const ProjectsList = () => {
                     سبب الرفض <span className="text-red-500">*</span>
                   </label>
                   <textarea
-                    value={replyForm.rejection_reason}
-                    onChange={(e) => setReplyForm({ ...replyForm, rejection_reason: e.target.value })}
-                    rows={4}
+                    value={ replyForm.rejection_reason }
+                    onChange={ (e) => setReplyForm({ ...replyForm, rejection_reason: e.target.value }) }
+                    rows={ 4 }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                     placeholder="أدخل سبب رفض المونتاج..."
                     required
@@ -10336,47 +10377,47 @@ const ProjectsList = () => {
                 <div className="flex items-center justify-end gap-3 pt-4">
                   <button
                     type="button"
-                    onClick={handleCloseReplyModal}
+                    onClick={ handleCloseReplyModal }
                     className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                    disabled={replying}
+                    disabled={ replying }
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={replying}
+                    disabled={ replying }
                   >
-                    {replying ? 'جاري الإرسال...' : 'إرسال الرد'}
+                    { replying ? 'جاري الإرسال...' : 'إرسال الرد' }
                   </button>
                 </div>
               </form>
             </div>
           </div>
         </div>
-      )}
+      ) }
 
-      {/* 💱 Shekel Conversion Modal */}
-      {showShekelModal && supplyProject && (
+      {/* 💱 Shekel Conversion Modal */ }
+      { showShekelModal && supplyProject && (
         <ShekelConversionModal
-          isOpen={showShekelModal}
-          onClose={() => {
+          isOpen={ showShekelModal }
+          onClose={ () => {
             setShowShekelModal(false);
             setIsEditingShekel(false);
             setExchangeRate('');
             setTransferDiscountPercentage(0);
-          }}
-          project={supplyProject}
-          exchangeRate={exchangeRate}
-          setExchangeRate={setExchangeRate}
-          transferDiscountPercentage={transferDiscountPercentage}
-          setTransferDiscountPercentage={setTransferDiscountPercentage}
-          onConvert={handleConvertToShekel}
-          isConverting={convertingToShekel}
-          formatCurrency={(amount) => parseFloat(amount || 0).toFixed(2)}
-          isEditing={isEditingShekel}
+          } }
+          project={ supplyProject }
+          exchangeRate={ exchangeRate }
+          setExchangeRate={ setExchangeRate }
+          transferDiscountPercentage={ transferDiscountPercentage }
+          setTransferDiscountPercentage={ setTransferDiscountPercentage }
+          onConvert={ handleConvertToShekel }
+          isConverting={ convertingToShekel }
+          formatCurrency={ (amount) => parseFloat(amount || 0).toFixed(2) }
+          isEditing={ isEditingShekel }
         />
-      )}
+      ) }
     </div>
   );
 };
@@ -10402,10 +10443,10 @@ const ShekelConversionModal = ({ isOpen, onClose, project, exchangeRate, setExch
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
             <DollarSign className="w-6 h-6 text-amber-600" />
-            {isEditing ? 'تعديل التحويل للشيكل' : 'تحويل المبلغ إلى شيكل'}
+            { isEditing ? 'تعديل التحويل للشيكل' : 'تحويل المبلغ إلى شيكل' }
           </h3>
           <button
-            onClick={onClose}
+            onClick={ onClose }
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <X className="w-5 h-5 text-gray-500" />
@@ -10413,13 +10454,13 @@ const ShekelConversionModal = ({ isOpen, onClose, project, exchangeRate, setExch
         </div>
 
         <div className="space-y-4">
-          {/* Current Amount */}
+          {/* Current Amount */ }
           <div className="bg-gray-50 rounded-xl p-4">
             <p className="text-sm text-gray-600 mb-1">المبلغ الحالي (دولار)</p>
-            <p className="text-2xl font-bold text-gray-800">${formatCurrency(netAmount)}</p>
+            <p className="text-2xl font-bold text-gray-800">${ formatCurrency(netAmount) }</p>
           </div>
 
-          {/* Exchange Rate Input */}
+          {/* Exchange Rate Input */ }
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               سعر الصرف (1 دولار = ؟ شيكل) <span className="text-red-500">*</span>
@@ -10428,14 +10469,14 @@ const ShekelConversionModal = ({ isOpen, onClose, project, exchangeRate, setExch
               type="number"
               step="0.01"
               min="0.01"
-              value={exchangeRate}
-              onChange={(e) => setExchangeRate(e.target.value)}
+              value={ exchangeRate }
+              onChange={ (e) => setExchangeRate(e.target.value) }
               placeholder="مثال: 3.65"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-lg"
             />
           </div>
 
-          {/* Transfer Discount Percentage Input */}
+          {/* Transfer Discount Percentage Input */ }
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               نسبة خصم النقل (%) <span className="text-red-500">*</span>
@@ -10445,8 +10486,8 @@ const ShekelConversionModal = ({ isOpen, onClose, project, exchangeRate, setExch
               step="0.01"
               min="0.01"
               max="100"
-              value={transferDiscountPercentage}
-              onChange={(e) => setTransferDiscountPercentage(e.target.value)}
+              value={ transferDiscountPercentage }
+              onChange={ (e) => setTransferDiscountPercentage(e.target.value) }
               placeholder="مثال: 5 (مطلوب)"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-lg"
               required
@@ -10456,75 +10497,75 @@ const ShekelConversionModal = ({ isOpen, onClose, project, exchangeRate, setExch
             </p>
           </div>
 
-          {/* Calculation Preview */}
-          {rate > 0 && (
+          {/* Calculation Preview */ }
+          { rate > 0 && (
             <div className="space-y-3">
-              {transferDiscount > 0 && (
+              { transferDiscount > 0 && (
                 <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm text-blue-600">المبلغ الأصلي:</p>
-                    <p className="text-lg font-bold text-blue-700">${formatCurrency(netAmount)}</p>
+                    <p className="text-lg font-bold text-blue-700">${ formatCurrency(netAmount) }</p>
                   </div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm text-blue-600">نسبة خصم النقل ({transferDiscount}%):</p>
-                    <p className="text-lg font-bold text-red-600">-${formatCurrency(transferDiscountAmount)}</p>
+                    <p className="text-sm text-blue-600">نسبة خصم النقل ({ transferDiscount }%):</p>
+                    <p className="text-lg font-bold text-red-600">-${ formatCurrency(transferDiscountAmount) }</p>
                   </div>
                   <div className="flex items-center justify-between pt-2 border-t-2 border-blue-300">
                     <p className="text-sm font-medium text-blue-700">المبلغ بعد الخصم:</p>
-                    <p className="text-xl font-bold text-blue-800">${formatCurrency(amountAfterTransferDiscount)}</p>
+                    <p className="text-xl font-bold text-blue-800">${ formatCurrency(amountAfterTransferDiscount) }</p>
                   </div>
                 </div>
-              )}
+              ) }
 
               <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
                 <p className="text-sm text-green-600 mb-1">المبلغ بعد التحويل (شيكل)</p>
-                <p className="text-2xl font-bold text-green-700">₪{formatCurrency(convertedAmount)}</p>
+                <p className="text-2xl font-bold text-green-700">₪{ formatCurrency(convertedAmount) }</p>
                 <p className="text-xs text-green-600 mt-1">
-                  {transferDiscount > 0 ? (
-                    <>المبلغ بعد الخصم ({formatCurrency(amountAfterTransferDiscount)} دولار) × {rate} = {formatCurrency(convertedAmount)} شيكل</>
+                  { transferDiscount > 0 ? (
+                    <>المبلغ بعد الخصم ({ formatCurrency(amountAfterTransferDiscount) } دولار) × { rate } = { formatCurrency(convertedAmount) } شيكل</>
                   ) : (
-                    <>سعر الصرف: 1 دولار = {rate} شيكل</>
-                  )}
+                    <>سعر الصرف: 1 دولار = { rate } شيكل</>
+                  ) }
                 </p>
               </div>
             </div>
-          )}
+          ) }
 
-          {/* Warning */}
+          {/* Warning */ }
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">
             <p className="font-medium mb-1">⚠️ تنبيه مهم:</p>
             <p>
-              {isEditing
+              { isEditing
                 ? 'سيتم تحديث سعر الصرف ونسبة الخصم، وسيتم إعادة حساب المبلغ بالشيكل بناءً على القيم الجديدة.'
                 : 'بعد التحويل، سيتم حساب جميع تكاليف التوريد والفائض بالشيكل. هذه العملية لا يمكن التراجع عنها.'
               }
             </p>
           </div>
 
-          {/* Actions */}
+          {/* Actions */ }
           <div className="flex items-center justify-end gap-3 pt-4">
             <button
-              onClick={onClose}
+              onClick={ onClose }
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors"
             >
               إلغاء
             </button>
             <button
-              onClick={onConvert}
-              disabled={isConverting || !rate || rate <= 0 || !transferDiscountPercentage || parseFloat(transferDiscountPercentage) <= 0}
+              onClick={ onConvert }
+              disabled={ isConverting || !rate || rate <= 0 || !transferDiscountPercentage || parseFloat(transferDiscountPercentage) <= 0 }
               className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              {isConverting ? (
+              { isConverting ? (
                 <>
                   <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-                  {isEditing ? 'جاري التحديث...' : 'جاري التحويل...'}
+                  { isEditing ? 'جاري التحديث...' : 'جاري التحويل...' }
                 </>
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4" />
-                  {isEditing ? 'تأكيد التعديل' : 'تأكيد التحويل'}
+                  { isEditing ? 'تأكيد التعديل' : 'تأكيد التحويل' }
                 </>
-              )}
+              ) }
             </button>
           </div>
         </div>

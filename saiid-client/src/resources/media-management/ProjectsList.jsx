@@ -151,7 +151,7 @@ const MediaProjectsList = () => {
       execution_date_from: '',
       execution_date_to: '',
       page: 1,
-      perPage: 50, // ✅ عرض 50 مشروع لكل صفحة لتحسين الأداء
+      perPage: 'all', // ✅ عرض جميع المشاريع افتراضياً
     };
   };
 
@@ -170,7 +170,7 @@ const MediaProjectsList = () => {
     execution_date_from: '',
     execution_date_to: '',
     page: 1,
-    perPage: 50, // ✅ القيمة الافتراضية: عرض 50 مشروع لكل صفحة (تحسين الأداء)
+    perPage: 'all', // ✅ القيمة الافتراضية: عرض جميع المشاريع
   });
 
   const [showFilters, setShowFilters] = useState(false);
@@ -750,16 +750,16 @@ const MediaProjectsList = () => {
       let endpoint = '/project-proposals';
       const params = new URLSearchParams();
 
-      // إضافة pagination
-      // ✅ إذا كان perPage هو 'all'، نستخدم قيمة كبيرة جداً لجلب جميع المشاريع
-      let perPageValue = appliedFilters.perPage === 'all' ? 10000 : parseInt(appliedFilters.perPage) || 50;
-      params.append('perPage', perPageValue.toString());
-      params.append('page', appliedFilters.page.toString());
+      // ✅ دائماً نطلب أكبر عدد ممكن لتقليل عدد طلبات الصفحات
+      const FORCE_PER_PAGE = 5000;
+      let perPageValue = FORCE_PER_PAGE;
+      params.set('perPage', perPageValue.toString());
+      params.append('page', '1');
 
       // ✅ إذا كان هناك producerId في الـ URL، استخدم الـ endpoint الجديد
       if (producerId) {
         endpoint = `/montage-producers/${producerId}/projects`;
-
+ 
         if (appliedFilters.execution_date_from) {
           params.append('from_date', appliedFilters.execution_date_from);
         }
@@ -791,16 +791,14 @@ const MediaProjectsList = () => {
         }
       }
 
-      // ✅ جلب جميع الصفحات تلقائياً إذا كان هناك أكثر من صفحة واحدة أو إذا كان perPage هو 'all'
+      // ✅ جلب جميع الصفحات تلقائياً
       let allProjectsDataRaw = [];
       let firstResponseData = null;
       let totalPages = 1;
-      // ✅ عند تفعيل المتأخر فقط، نحتاج نسحب عدد أكبر لتفادي "فلترة على بيانات غير مكتملة"
-      const isAllMode = appliedFilters.perPage === 'all' || appliedFilters.priority_only;
 
       // جلب الصفحة الأولى
       const firstResponse = await apiClient.get(`${endpoint}?${params.toString()}`, {
-        timeout: 3000,
+        timeout: 30000, // ✅ 30 ثانية للطلب الأول
         signal: abortController.signal
       });
 
@@ -828,40 +826,41 @@ const MediaProjectsList = () => {
           allProjectsDataRaw = firstResponseData.data;
         }
 
-        // ✅ جلب باقي الصفحات إذا كان هناك أكثر من صفحة واحدة أو إذا كان perPage هو 'all'
-        if ((totalPages > 1 || isAllMode)) {
-          const maxPages = isAllMode ? 50 : 10; // إذا كان 'all'، نجلب حتى 50 صفحة
-          for (let page = 2; page <= totalPages && page <= maxPages; page++) {
-            try {
-              const pageParams = new URLSearchParams(params);
-              pageParams.set('page', page.toString());
+        // ✅ جلب باقي الصفحات بشكل متوازي للسرعة
+        if (totalPages > 1) {
+          const maxPages = Math.min(totalPages, 200); // حتى 200 صفحة
+          const pageNumbers = [];
+          for (let p = 2; p <= maxPages; p++) pageNumbers.push(p);
 
-              const pageResponse = await apiClient.get(`${endpoint}?${pageParams.toString()}`, {
-                timeout: 3000,
-                signal: abortController.signal
-              });
-
-              if (pageResponse.data.success) {
-                const pageData = pageResponse.data;
-                let pageProjects = [];
-
-                if (pageData.projects && Array.isArray(pageData.projects)) {
-                  pageProjects = pageData.projects;
-                } else if (pageData.data && pageData.data.data) {
-                  pageProjects = pageData.data.data || [];
-                } else if (Array.isArray(pageData.data)) {
-                  pageProjects = pageData.data;
+          // جلب كل الصفحات بشكل متوازي
+          const pageResults = await Promise.all(
+            pageNumbers.map(async (page) => {
+              try {
+                const pageParams = new URLSearchParams(params);
+                pageParams.set('page', page.toString());
+                const pageResponse = await apiClient.get(`${endpoint}?${pageParams.toString()}`, {
+                  timeout: 30000,
+                  signal: abortController.signal
+                });
+                if (pageResponse.data.success) {
+                  const pd = pageResponse.data;
+                  if (pd.projects && Array.isArray(pd.projects)) return pd.projects;
+                  if (pd.data && pd.data.data) return pd.data.data || [];
+                  if (Array.isArray(pd.data)) return pd.data;
                 }
+              } catch (err) {
+                if (import.meta.env.DEV) console.warn(`⚠️ Failed page ${page}:`, err.message);
+              }
+              return [];
+            })
+          );
 
-                allProjectsDataRaw = allProjectsDataRaw.concat(pageProjects);
-              }
-            } catch (pageError) {
-              // في حالة فشل جلب صفحة معينة، نتوقف ونستخدم ما تم جلبه
-              if (import.meta.env.DEV) {
-                console.warn(`⚠️ Failed to fetch page ${page}:`, pageError.message);
-              }
-              break;
-            }
+          pageResults.forEach((pageProjects) => {
+            allProjectsDataRaw = allProjectsDataRaw.concat(pageProjects);
+          });
+
+          if (import.meta.env.DEV) {
+            console.log(`✅ Fetched ${totalPages} pages in parallel, total raw: ${allProjectsDataRaw.length}`);
           }
         }
       }
@@ -2859,31 +2858,11 @@ const MediaProjectsList = () => {
               </div>
             </div>
           ) }
-          {/* ✅ قائمة اختيار عدد المشاريع المعروضة */ }
+          {/* ✅ شريط عداد مشاريع الإعلام (يستثني المنتهية) */ }
           { projects.length > 0 && (
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between flex-wrap gap-4">
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-gray-700">عدد المشاريع المعروضة:</label>
-                <select
-                  value={ appliedFilters.perPage }
-                  onChange={ (e) => {
-                    const newPerPage = e.target.value;
-                    setFilters({ ...filters, perPage: newPerPage, page: 1 });
-                    setAppliedFilters({ ...appliedFilters, perPage: newPerPage, page: 1 });
-                    setRefreshTrigger(prev => prev + 1); // ✅ إعادة تحميل البيانات
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  } }
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 text-sm font-medium"
-                >
-                  <option value="25">25 مشروع</option>
-                  <option value="50">50 مشروع</option>
-                  <option value="100">100 مشروع</option>
-                  <option value="200">200 مشروع</option>
-                  <option value="500">500 مشروع</option>
-                </select>
-              </div>
+            <div className="p-4 border-b border-gray-200 flex items-center justify-end">
               <div className="text-sm text-gray-600">
-                إجمالي المشاريع: <span className="font-bold text-gray-800">{ pagination.total || projects.length }</span>
+                إجمالي المشاريع: <span className="font-bold text-sky-700">{ projects.filter(p => p?.status !== 'منتهي').length }</span>
               </div>
             </div>
           ) }
@@ -3135,34 +3114,7 @@ const MediaProjectsList = () => {
                 </table>
               </div>
 
-              {/* Pagination */ }
-              { pagination.last_page > 1 && (
-                <div className="flex items-center justify-between p-6 border-t border-gray-200">
-                  <div className="text-sm text-gray-700">
-                    عرض { ((pagination.current_page - 1) * pagination.per_page) + 1 } إلى{ ' ' }
-                    { Math.min(pagination.current_page * pagination.per_page, pagination.total) } من { pagination.total } مشروع
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={ () => handlePageChange(pagination.current_page - 1) }
-                      disabled={ pagination.current_page === 1 }
-                      className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                    <span className="px-4 py-2 text-sm font-medium text-gray-700">
-                      صفحة { pagination.current_page } من { pagination.last_page }
-                    </span>
-                    <button
-                      onClick={ () => handlePageChange(pagination.current_page + 1) }
-                      disabled={ pagination.current_page === pagination.last_page }
-                      className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <ChevronLeft className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-              ) }
+              {/* ✅ pagination مُزالة - جميع المشاريع تُعرض في نفس الصفحة */ }
             </>
           ) }
         </div>
