@@ -76,7 +76,8 @@ class ProjectProposalController extends Controller
         protected ExportService $exportService,
         protected AdvancedUpdateService $advancedUpdateService,
         protected BeneficiaryService $beneficiaryService,
-    ) {}
+    ) {
+    }
 
     // ═══════════════════════════════════════════════════════
     //  CRUD
@@ -91,7 +92,8 @@ class ProjectProposalController extends Controller
 
         $project = $result['project'];
         $sync = $this->imageService->syncNoteImages($request, $project);
-        if (isset($sync['error'])) return $sync['error'];
+        if (isset($sync['error']))
+            return $sync['error'];
 
         $this->copyImagesToChildren($project);
         $this->clearProjectsCache();
@@ -100,17 +102,7 @@ class ProjectProposalController extends Controller
     }
 
     /**
-     * ✅ FIX: The index method was double-serializing data through getCachedResponse,
-     *    causing numeric values to become 0/null and relationship data to be lost.
-     *
-     *    ROOT CAUSE:
-     *    1. indexService->getProjects() returns JsonResponse with properly cast models
-     *    2. ->getData(true) strips Eloquent casts (floats→strings, nulls→0)
-     *    3. Cache serializes the degraded array
-     *    4. getCachedResponse wraps it in another JsonResponse
-     *
-     *    FIX: Build the response data array DIRECTLY from the query/pagination,
-     *    not from an intermediate JsonResponse. This preserves all data types.
+     * ✅ List NON-finished projects (excludes منتهي).
      */
     public function index(Request $request): JsonResponse
     {
@@ -119,22 +111,13 @@ class ProjectProposalController extends Controller
             return $this->unauthorizedResponse('يجب تسجيل الدخول');
         }
 
-        $userRole = strtolower($user->role ?? 'guest');
-
-        // ✅ Build cache key
-        $cacheKey = $this->buildCacheKey('project_proposals_unfinished', $request, $user->id, $userRole);
-
-        $ttl = $userRole === 'media_manager' ? 60 : 300;
-
-        return $this->getCachedResponse($cacheKey, function () use ($request, $user, $userRole) {
-            // ✅ FIX: Get data directly from query + pagination, NOT through JsonResponse->getData()
-            //    This preserves all Eloquent casts, accessors, and relationship data.
-            return $this->buildIndexResponseData($request, $user, $userRole, finishedOnly: false);
-        }, $ttl);
+        // false = exclude finished projects
+        $result = $this->indexService->getProjects($request, $user, false);
+        return $result['response'];
     }
 
     /**
-     * ✅ NEW: List finished projects only (with pagination by default).
+     * ✅ List ONLY finished projects (منتهي).
      */
     public function indexFinished(Request $request): JsonResponse
     {
@@ -143,82 +126,9 @@ class ProjectProposalController extends Controller
             return $this->unauthorizedResponse('يجب تسجيل الدخول');
         }
 
-        $userRole = strtolower($user->role ?? 'guest');
-
-        // ✅ Build cache key for finished projects
-        $cacheKey = $this->buildCacheKey('project_proposals_finished', $request, $user->id, $userRole);
-
-        $ttl = 300; // 5 minutes — finished projects don't change often
-
-        return $this->getCachedResponse($cacheKey, function () use ($request, $user, $userRole) {
-            return $this->buildIndexResponseData($request, $user, $userRole, finishedOnly: true);
-        }, $ttl);
-    }
-
-    /**
-     * ✅ NEW: Build the index response data array directly.
-     *    This avoids the double-serialization problem.
-     *
-     *    Returns a plain array that getCachedResponse() will wrap in JsonResponse.
-     */
-    private function buildIndexResponseData(Request $request, $user, string $userRole, ?bool $finishedOnly = null): array
-    {
-        // Build the query using ProjectProposalQuery
-        $queryBuilder = $this->query->buildListQuery($request, $user, $finishedOnly);
-
-        // Get per-page value
-        // ✅ For unfinished (finishedOnly=false): return all by default (forceAllDefault=true)
-        // ✅ For finished (finishedOnly=true): use normal pagination
-        $forceAllDefault = ($finishedOnly === false);
-        $perPage = $this->query->getPerPageValue($request, $userRole, $forceAllDefault);
-
-        // Paginate
-        $paginated = $queryBuilder->paginate($perPage);
-
-        // ✅ KEY FIX: Convert each model to array WITH proper casting
-        //    Using ->through() preserves the paginator structure while
-        //    ensuring each model's casts/accessors are applied.
-        $projects = collect($paginated->items())->map(function (ProjectProposal $project) {
-            $data = $project->toArray();
-
-            // ✅ Ensure numeric fields are properly typed (not null/0 when they have values)
-            $numericFields = [
-                'donation_amount',
-                'net_amount',
-                'amount_in_usd',
-                'amount_in_shekel',
-                'shekel_exchange_rate',
-                'transfer_discount_percentage',
-                'estimated_duration_days',
-                'beneficiaries_count',
-                'beneficiaries_per_unit',
-                'total_beneficiaries',
-            ];
-
-            foreach ($numericFields as $field) {
-                if (array_key_exists($field, $data)) {
-                    // Keep null as null, but ensure non-null values are proper numbers
-                    if ($data[$field] !== null) {
-                        $data[$field] = is_numeric($data[$field])
-                            ? (strpos((string)$data[$field], '.') !== false ? (float)$data[$field] : (int)$data[$field])
-                            : $data[$field];
-                    }
-                }
-            }
-
-            return $data;
-        })->all();
-
-        return [
-            'success'     => true,
-            'projects'    => $projects,
-            'total'       => $paginated->total(),
-            'currentPage' => $paginated->currentPage(),
-            'totalPages'  => $paginated->lastPage(),
-            'perPage'     => $paginated->perPage(),
-            'from'        => $paginated->firstItem(),
-            'to'          => $paginated->lastItem(),
-        ];
+        // true = only finished projects
+        $result = $this->indexService->getProjects($request, $user, true);
+        return $result['response'];
     }
 
     public function show(int $id): JsonResponse
@@ -240,8 +150,10 @@ class ProjectProposalController extends Controller
     public function update(UpdateProjectProposalRequest $request, int $id): JsonResponse
     {
         $user = $request->user();
-        if ($this->updateService->isBeneficiariesOnlyUpdate($request)
-            && $this->hasRole($user, [UserRole::ADMIN, UserRole::PROJECT_MANAGER, UserRole::EXECUTED_PROJECTS_COORDINATOR, UserRole::ORPHAN_SPONSOR_COORDINATOR])) {
+        if (
+            $this->updateService->isBeneficiariesOnlyUpdate($request)
+            && $this->hasRole($user, [UserRole::ADMIN, UserRole::PROJECT_MANAGER, UserRole::EXECUTED_PROJECTS_COORDINATOR, UserRole::ORPHAN_SPONSOR_COORDINATOR])
+        ) {
             return $this->updateBeneficiaries($request, $id);
         }
 
@@ -254,8 +166,8 @@ class ProjectProposalController extends Controller
             return $this->successResponse([
                 'project' => $this->ensureNumericTypes(
                     $result['project'] instanceof ProjectProposal
-                        ? $result['project']->toArray()
-                        : (array)$result['project']
+                    ? $result['project']->toArray()
+                    : (array) $result['project']
                 ),
             ], 'تم تحديث المشروع بنجاح');
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
@@ -275,7 +187,7 @@ class ProjectProposalController extends Controller
             $result = $this->deleteService->delete($id, $request->user());
             $this->clearProjectsCache();
             return $this->successResponse([
-                'items_returned_to_warehouse'    => $result['items_returned'],
+                'items_returned_to_warehouse' => $result['items_returned'],
                 'project_status_before_deletion' => $result['status_before'],
             ], $result['message']);
         } catch (\Exception $e) {
@@ -290,9 +202,9 @@ class ProjectProposalController extends Controller
     public function assignProject(AssignResearcherRequest $request, int $id): JsonResponse
     {
         return $this->handleServiceCall(
-            fn () => $this->assignmentService->assignResearcher($request, $id, $request->user()),
+            fn() => $this->assignmentService->assignResearcher($request, $id, $request->user()),
             'فشل إسناد المشروع',
-            afterSuccess: fn () => $this->clearProjectsCache()
+            afterSuccess: fn() => $this->clearProjectsCache()
         );
     }
 
@@ -303,9 +215,9 @@ class ProjectProposalController extends Controller
             $fix = $this->assignmentService->autoFixMissingResearcher($project, $request->user());
             if ($fix['fixed']) {
                 return response()->json([
-                    'success'    => false,
-                    'error'      => 'لا يمكن إسناد المصور',
-                    'message'    => $fix['error'],
+                    'success' => false,
+                    'error' => 'لا يمكن إسناد المصور',
+                    'message' => $fix['error'],
                     'auto_fixed' => true,
                     'new_status' => 'تم التوريد',
                 ], 422);
@@ -327,13 +239,13 @@ class ProjectProposalController extends Controller
             $this->clearProjectsCache();
 
             return $this->successResponse([
-                'project'         => $project,
-                'status_changed'  => $result['status_changed'],
+                'project' => $project,
+                'status_changed' => $result['status_changed'],
                 'is_reassignment' => $result['is_reassignment'],
             ], match (true) {
                 $result['is_reassignment'] => 'تم إعادة إسناد المصور بنجاح',
-                $result['status_changed']  => 'تم إسناد المصور - المشروع جاهز للتنفيذ',
-                default                    => 'تم إسناد المصور بنجاح',
+                $result['status_changed'] => 'تم إسناد المصور - المشروع جاهز للتنفيذ',
+                default => 'تم إسناد المصور بنجاح',
             });
         } catch (\Exception $e) {
             return $this->errorResponse('فشل إسناد المصور', $e->getMessage(), 500, $e);
@@ -364,12 +276,14 @@ class ProjectProposalController extends Controller
         $this->clearProjectsCache();
         $failed = count($failedReasons);
 
-        return $this->successResponse([
-            'assigned_count' => $assigned,
-            'failed_count'   => $failed,
-            'failed_ids'     => array_keys($failedReasons),
-            'failed_reasons' => $failedReasons,
-        ], $failed === 0
+        return $this->successResponse(
+            [
+                'assigned_count' => $assigned,
+                'failed_count' => $failed,
+                'failed_ids' => array_keys($failedReasons),
+                'failed_reasons' => $failedReasons,
+            ],
+            $failed === 0
             ? "تم إسناد المصور لـ {$assigned} مشاريع"
             : "تم {$assigned}، فشل {$failed}"
         );
@@ -378,12 +292,12 @@ class ProjectProposalController extends Controller
     public function assignMontageProducer(AssignMontageProducerRequest $request, int $id): JsonResponse
     {
         return $this->handleServiceCall(
-            fn () => $this->montageService->assign($id, (int) $request->montage_producer_id, $request->user()),
+            fn() => $this->montageService->assign($id, (int) $request->montage_producer_id, $request->user()),
             'فشل إسناد ممنتج المونتاج',
-            afterSuccess: fn () => $this->clearProjectsCache(),
+            afterSuccess: fn() => $this->clearProjectsCache(),
             successMessageKey: 'is_reassignment',
             successMessages: [
-                true  => 'تم إعادة إسناد ممنتج المونتاج بنجاح',
+                true => 'تم إعادة إسناد ممنتج المونتاج بنجاح',
                 false => 'تم إسناد ممنتج المونتاج بنجاح',
             ]
         );
@@ -392,7 +306,7 @@ class ProjectProposalController extends Controller
     public function batchAssignProducer(BatchAssignProducerRequest $request): JsonResponse
     {
         return $this->handleBatchOperation(
-            fn () => $this->montageService->batchAssign(
+            fn() => $this->montageService->batchAssign(
                 array_unique($request->input('project_ids')),
                 (int) $request->montage_producer_id,
                 $request->user()
@@ -409,7 +323,7 @@ class ProjectProposalController extends Controller
     public function returnToSupply(Request $request, int $id): JsonResponse
     {
         return $this->handleStatusTransition(
-            fn () => $this->statusService->returnToSupply($id, $request->user()),
+            fn() => $this->statusService->returnToSupply($id, $request->user()),
             'فشل إرجاع المشروع',
             'تم إرجاع المشروع إلى حالة التوريد بنجاح'
         );
@@ -418,7 +332,7 @@ class ProjectProposalController extends Controller
     public function postponeProject(PostponeProjectRequest $request, int $id): JsonResponse
     {
         return $this->handleStatusTransition(
-            fn () => $this->statusService->postpone($id, $request->user(), $request->postponement_reason),
+            fn() => $this->statusService->postpone($id, $request->user(), $request->postponement_reason),
             'فشل تأجيل المشروع',
             'تم تأجيل المشروع بنجاح'
         );
@@ -427,7 +341,7 @@ class ProjectProposalController extends Controller
     public function resumeProject(Request $request, int $id): JsonResponse
     {
         return $this->handleStatusTransition(
-            fn () => $this->statusService->resume($id, $request->user()),
+            fn() => $this->statusService->resume($id, $request->user()),
             'فشل استئناف المشروع',
             'تم استئناف المشروع بنجاح'
         );
@@ -436,7 +350,7 @@ class ProjectProposalController extends Controller
     public function moveToSupply(Request $request, int $id): JsonResponse
     {
         return $this->handleStatusTransition(
-            fn () => $this->statusService->moveToSupply($id, $request->user() ?? auth()->user()),
+            fn() => $this->statusService->moveToSupply($id, $request->user() ?? auth()->user()),
             'فشل نقل المشروع',
             'تم نقل المشروع لمرحلة التوريد'
         );
@@ -445,7 +359,7 @@ class ProjectProposalController extends Controller
     public function selectShelter(SelectShelterRequest $request, int $id): JsonResponse
     {
         return $this->handleStatusTransition(
-            fn () => $this->statusService->selectShelter($id, $request->shelter_id, $request->user()),
+            fn() => $this->statusService->selectShelter($id, $request->shelter_id, $request->user()),
             'فشل اختيار المخيم',
             'تم اختيار المخيم بنجاح',
             extraData: ['next_step' => 'يمكنك الآن الضغط على "نقل للتنفيذ"']
@@ -465,9 +379,9 @@ class ProjectProposalController extends Controller
             $alreadyTransferred = $result['already_transferred'] ?? false;
 
             $data = [
-                'success'   => true,
-                'proposal'  => $result['project'],
-                'message'   => $alreadyTransferred ? 'المشروع تم نقله مسبقاً' : 'تم نقل المشروع للتنفيذ بنجاح',
+                'success' => true,
+                'proposal' => $result['project'],
+                'message' => $alreadyTransferred ? 'المشروع تم نقله مسبقاً' : 'تم نقل المشروع للتنفيذ بنجاح',
                 'next_step' => $isSponsorship ? 'متابعة تنفيذ الكفالة' : 'مدير المشاريع يحدث الحالة إلى "تم التنفيذ"',
             ];
             if (!$isSponsorship && isset($result['executed_project'])) {
@@ -486,7 +400,7 @@ class ProjectProposalController extends Controller
     public function markAsExecuted(MarkAsExecutedRequest $request, int $id): JsonResponse
     {
         return $this->handleStatusTransition(
-            fn () => $this->statusService->markAsExecuted($id, $request->user(), $request->execution_date, $request->notes, $request),
+            fn() => $this->statusService->markAsExecuted($id, $request->user(), $request->execution_date, $request->notes, $request),
             'فشل تحديث حالة المشروع',
             'تم تحديث حالة المشروع إلى تم التنفيذ بنجاح'
         );
@@ -505,7 +419,7 @@ class ProjectProposalController extends Controller
                 return $this->addCorsHeaders(
                     response()->json([
                         'success' => false,
-                        'error'   => 'لا يمكن تحديث الحالة',
+                        'error' => 'لا يمكن تحديث الحالة',
                         'message' => $result['error'],
                     ], $result['code'] ?? 422)
                 );
@@ -555,8 +469,11 @@ class ProjectProposalController extends Controller
     {
         try {
             $result = $this->mediaStatusService->updateStatus(
-                $id, $request->status, $request->user(),
-                $request->notes, $request->rejection_reason
+                $id,
+                $request->status,
+                $request->user(),
+                $request->notes,
+                $request->rejection_reason
             );
 
             if (!$result['success']) {
@@ -566,9 +483,9 @@ class ProjectProposalController extends Controller
             $this->clearAllMediaCaches();
 
             return $this->successResponse([
-                'project'          => $result['project'],
-                'old_status'       => $result['old_status'],
-                'new_status'       => $result['new_status'],
+                'project' => $result['project'],
+                'old_status' => $result['old_status'],
+                'new_status' => $result['new_status'],
                 'old_media_status' => $result['old_media_status'],
                 'new_media_status' => $result['new_media_status'],
             ], 'تم تحديث حالة المونتاج بنجاح');
@@ -582,7 +499,7 @@ class ProjectProposalController extends Controller
     public function batchUpdateStatus(BatchUpdateStatusRequest $request): JsonResponse
     {
         return $this->handleBatchOperation(
-            fn () => $this->mediaStatusService->batchUpdate(
+            fn() => $this->mediaStatusService->batchUpdate(
                 array_unique($request->input('project_ids')),
                 $request->status,
                 $request->user(),
@@ -603,7 +520,8 @@ class ProjectProposalController extends Controller
     {
         try {
             $result = $this->conversionService->convertToShekel(
-                $id, $request->user(),
+                $id,
+                $request->user(),
                 (float) $request->shekel_exchange_rate,
                 (float) $request->input('transfer_discount_percentage', 0)
             );
@@ -671,7 +589,7 @@ class ProjectProposalController extends Controller
         try {
             $result = $this->mediaDashboardService->getData($user, $request->has('_refresh'));
             return $this->successResponse([
-                'data'   => $result['data'],
+                'data' => $result['data'],
                 'cached' => $result['cached'],
             ]);
         } catch (\Exception $e) {
@@ -686,13 +604,19 @@ class ProjectProposalController extends Controller
     public function testData(): JsonResponse
     {
         $project = ProjectProposal::with([
-            'currency', 'shelter', 'creator', 'assignedToTeam',
-            'assignedResearcher', 'photographer', 'assignedMontageProducer', 'subcategory',
+            'currency',
+            'shelter',
+            'creator',
+            'assignedToTeam',
+            'assignedResearcher',
+            'photographer',
+            'assignedMontageProducer',
+            'subcategory',
         ])->first();
 
         return $project
             ? $this->successResponse([
-                'project_raw'  => $project->toArray(),
+                'project_raw' => $project->toArray(),
                 'field_checks' => $this->buildFieldChecks($project),
             ])
             : $this->notFoundResponse('لا توجد مشاريع');
@@ -703,8 +627,7 @@ class ProjectProposalController extends Controller
     // ═══════════════════════════════════════════════════════
 
     /**
-     * ✅ Numeric fields that must preserve their type through serialization.
-     *    Used by ensureNumericTypes() and buildIndexResponseData().
+     * Numeric fields that must preserve their type through serialization.
      */
     private const NUMERIC_FIELDS = [
         'donation_amount',
@@ -724,9 +647,7 @@ class ProjectProposalController extends Controller
     ];
 
     /**
-     * ✅ NEW: Ensure numeric fields maintain proper types after array conversion.
-     *    Prevents null→0 and float→string issues when data passes through
-     *    toArray() → cache → json_encode.
+     * Ensure numeric fields maintain proper types after array conversion.
      */
     private function ensureNumericTypes(array $data): array
     {
@@ -737,13 +658,11 @@ class ProjectProposalController extends Controller
 
             $value = $data[$field];
 
-            // ✅ Keep null as null (don't convert to 0)
             if ($value === null) {
                 $data[$field] = null;
                 continue;
             }
 
-            // ✅ Ensure proper numeric type
             if (is_numeric($value)) {
                 $data[$field] = str_contains((string) $value, '.')
                     ? (float) $value
@@ -759,9 +678,9 @@ class ProjectProposalController extends Controller
      */
     private function handleStatusTransition(
         callable $call,
-        string   $errorLabel,
-        string   $successMsg,
-        array    $extraData = []
+        string $errorLabel,
+        string $successMsg,
+        array $extraData = []
     ): JsonResponse {
         try {
             $result = $call();
@@ -786,11 +705,11 @@ class ProjectProposalController extends Controller
      * Generic handler for service calls returning {success, message/error, ...}.
      */
     private function handleServiceCall(
-        callable  $call,
-        string    $errorLabel,
+        callable $call,
+        string $errorLabel,
         ?callable $afterSuccess = null,
-        ?string   $successMessageKey = null,
-        array     $successMessages = []
+        ?string $successMessageKey = null,
+        array $successMessages = []
     ): JsonResponse {
         try {
             $result = $call();
@@ -823,33 +742,33 @@ class ProjectProposalController extends Controller
      */
     private function handleBatchOperation(
         callable $call,
-        string   $verb,
-        string   $target,
-        string   $resultKey = 'assigned'
+        string $verb,
+        string $target,
+        string $resultKey = 'assigned'
     ): JsonResponse {
         try {
             $result = $call();
             $successItems = $result[$resultKey] ?? [];
-            $failedItems  = $result['failed'] ?? [];
+            $failedItems = $result['failed'] ?? [];
 
             $this->clearAllMediaCaches();
 
             $successCount = count($successItems);
-            $failedCount  = count($failedItems);
+            $failedCount = count($failedItems);
 
             if ($successCount === 0) {
                 return response()->json([
-                    'success'               => false,
-                    'message'               => "لم يتم {$verb} أي مشروع",
-                    "{$resultKey}_count"     => 0,
-                    'failed_projects'        => $failedItems,
+                    'success' => false,
+                    'message' => "لم يتم {$verb} أي مشروع",
+                    "{$resultKey}_count" => 0,
+                    'failed_projects' => $failedItems,
                 ], 400);
             }
 
             return $this->successResponse([
                 "{$resultKey}_count" => $successCount,
-                'projects'           => $successItems,
-                'failed_projects'    => $failedItems,
+                'projects' => $successItems,
+                'failed_projects' => $failedItems,
             ], "تم {$verb} {$successCount} {$target} بنجاح" . ($failedCount > 0 ? "، فشل {$failedCount}" : ''));
         } catch (\Exception $e) {
             return $this->errorResponse("فشل {$verb} {$target}", $e->getMessage(), 500, $e);
@@ -886,9 +805,9 @@ class ProjectProposalController extends Controller
         }
 
         $base += [
-            'total_months'         => $phaseResult['total_months'],
+            'total_months' => $phaseResult['total_months'],
             'monthly_phases_count' => $phaseResult['count'],
-            'first_monthly_phase'  => $phaseResult['first_phase'] ?? null,
+            'first_monthly_phase' => $phaseResult['first_phase'] ?? null,
         ];
         return $this->successResponse($base, "تم إنشاء المشروع مع {$phaseResult['count']} مشروع شهري", 201);
     }
@@ -896,9 +815,18 @@ class ProjectProposalController extends Controller
     private function loadProjectRelations(ProjectProposal $project): void
     {
         $full = [
-            'currency', 'creator', 'assignedToTeam', 'shelter', 'subcategory',
-            'projectType', 'assignedBy', 'assignedResearcher', 'photographer',
-            'assignedMontageProducer', 'parentProject', 'executedProject',
+            'currency',
+            'creator',
+            'assignedToTeam',
+            'shelter',
+            'subcategory',
+            'projectType',
+            'assignedBy',
+            'assignedResearcher',
+            'photographer',
+            'assignedMontageProducer',
+            'parentProject',
+            'executedProject',
         ];
 
         try {
@@ -920,15 +848,19 @@ class ProjectProposalController extends Controller
     {
         $checks = [];
         $fields = [
-            'donor_name', 'project_description', 'donation_amount',
-            'net_amount', 'amount_in_usd', 'estimated_duration_days',
+            'donor_name',
+            'project_description',
+            'donation_amount',
+            'net_amount',
+            'amount_in_usd',
+            'estimated_duration_days',
         ];
 
         foreach ($fields as $f) {
             $checks[$f] = [
                 'exists' => !is_null($p->$f),
-                'value'  => $p->$f,
-                'type'   => gettype($p->$f),
+                'value' => $p->$f,
+                'type' => gettype($p->$f),
             ];
         }
 
@@ -939,18 +871,19 @@ class ProjectProposalController extends Controller
     {
         Log::error('DB error', ['user_id' => $user->id ?? null, 'error' => $e->getMessage()]);
 
-        if (str_contains($e->getMessage(), 'timeout')
+        if (
+            str_contains($e->getMessage(), 'timeout')
             || str_contains($e->getMessage(), 'timed out')
             || $e->getCode() == 2006
         ) {
             return response()->json([
-                'success'     => true,
-                'projects'    => [],
-                'total'       => 0,
+                'success' => true,
+                'projects' => [],
+                'total' => 0,
                 'currentPage' => 1,
-                'totalPages'  => 0,
-                'perPage'     => 20,
-                'message'     => 'انتهت مهلة الاتصال.',
+                'totalPages' => 0,
+                'perPage' => 20,
+                'message' => 'انتهت مهلة الاتصال.',
             ]);
         }
 
@@ -1051,15 +984,15 @@ class ProjectProposalController extends Controller
 
     public function export(Request $request)
     {
-        $startDate   = $request->query('start_date');
-        $endDate     = $request->query('end_date');
-        $statuses    = $request->query('statuses');
+        $startDate = $request->query('start_date');
+        $endDate = $request->query('end_date');
+        $statuses = $request->query('statuses');
         $projectType = $request->query('project_type');
 
         if ($startDate && !strtotime($startDate)) {
             return response()->json([
                 'success' => false,
-                'error'   => 'تاريخ البداية غير صحيح',
+                'error' => 'تاريخ البداية غير صحيح',
                 'message' => 'يجب أن يكون تاريخ البداية بصيغة صحيحة (YYYY-MM-DD)',
             ], 400);
         }
@@ -1067,7 +1000,7 @@ class ProjectProposalController extends Controller
         if ($endDate && !strtotime($endDate)) {
             return response()->json([
                 'success' => false,
-                'error'   => 'تاريخ النهاية غير صحيح',
+                'error' => 'تاريخ النهاية غير صحيح',
                 'message' => 'يجب أن يكون تاريخ النهاية بصيغة صحيحة (YYYY-MM-DD)',
             ], 400);
         }
@@ -1075,7 +1008,7 @@ class ProjectProposalController extends Controller
         if ($startDate && $endDate && strtotime($startDate) > strtotime($endDate)) {
             return response()->json([
                 'success' => false,
-                'error'   => 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية',
+                'error' => 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية',
                 'message' => 'الرجاء التحقق من التواريخ المدخلة',
             ], 400);
         }
@@ -1100,7 +1033,7 @@ class ProjectProposalController extends Controller
         if ($query->count() === 0) {
             return response()->json([
                 'success' => false,
-                'error'   => 'لا يوجد مشاريع للتصدير',
+                'error' => 'لا يوجد مشاريع للتصدير',
                 'message' => 'لا توجد مشاريع تطابق معايير الفلترة المحددة',
             ], 404);
         }
@@ -1114,22 +1047,22 @@ class ProjectProposalController extends Controller
             );
         } catch (\Exception $e) {
             Log::error('Error exporting project proposals to Excel: ' . $e->getMessage(), [
-                'start_date'   => $startDate,
-                'end_date'     => $endDate,
-                'statuses'     => $statusArray,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'statuses' => $statusArray,
                 'project_type' => $projectType,
-                'trace'        => $e->getTraceAsString(),
+                'trace' => $e->getTraceAsString(),
             ]);
             return response()->json([
                 'success' => false,
-                'error'   => 'فشل تصدير البيانات',
+                'error' => 'فشل تصدير البيانات',
                 'message' => $e->getMessage(),
             ], 500);
         }
     }
 
     /**
-     * ✅ NEW: Parse status filter from multiple possible input formats.
+     * Parse status filter from multiple possible input formats.
      */
     private function parseStatusFilter(mixed $statuses, ?string $singleStatus): array
     {
@@ -1154,11 +1087,11 @@ class ProjectProposalController extends Controller
             $statusArray = [$singleStatus];
         }
 
-        return array_values(array_filter($statusArray, fn ($s) => !empty($s) && $s !== 'all' && $s !== 'الكل'));
+        return array_values(array_filter($statusArray, fn($s) => !empty($s) && $s !== 'all' && $s !== 'الكل'));
     }
 
     /**
-     * ✅ NEW: Build export filename from filter params.
+     * Build export filename from filter params.
      */
     private function buildExportFileName(?string $startDate, ?string $endDate, array $statusArray, ?string $projectType): string
     {
@@ -1173,7 +1106,7 @@ class ProjectProposalController extends Controller
         }
 
         if (!empty($statusArray)) {
-            $statusStr = implode('_', array_map(fn ($s) => str_replace(' ', '_', $s), $statusArray));
+            $statusStr = implode('_', array_map(fn($s) => str_replace(' ', '_', $s), $statusArray));
             $fileName .= "_status_{$statusStr}";
         }
 
@@ -1212,14 +1145,14 @@ class ProjectProposalController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'error'   => 'المشروع غير موجود',
+                'error' => 'المشروع غير موجود',
                 'message' => $e->getMessage(),
             ], 404)->withHeaders($this->imageCorsHeaders($this->resolveCorsOrigin()));
         }
     }
 
     /**
-     * ✅ NEW: Serve an image file with proper headers.
+     * Serve an image file with proper headers.
      */
     private function serveImageFile(string $filePath, string $corsOrigin)
     {
@@ -1232,7 +1165,7 @@ class ProjectProposalController extends Controller
     }
 
     /**
-     * ✅ NEW: Resolve CORS origin for image endpoints.
+     * Resolve CORS origin for image endpoints.
      */
     private function resolveCorsOrigin(): string
     {
@@ -1243,14 +1176,14 @@ class ProjectProposalController extends Controller
     }
 
     /**
-     * ✅ NEW: CORS headers for image endpoints.
+     * CORS headers for image endpoints.
      */
     private function imageCorsHeaders(string $corsOrigin): array
     {
         return [
-            'Access-Control-Allow-Origin'      => $corsOrigin,
-            'Access-Control-Allow-Methods'     => 'GET, OPTIONS',
-            'Access-Control-Allow-Headers'     => 'Content-Type, Authorization',
+            'Access-Control-Allow-Origin' => $corsOrigin,
+            'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+            'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
             'Access-Control-Allow-Credentials' => 'true',
         ];
     }
@@ -1265,9 +1198,9 @@ class ProjectProposalController extends Controller
         try {
             $project = ProjectProposal::with('noteImages')->findOrFail($id);
 
-            $images = $project->noteImages->map(fn ($image) => [
-                'id'            => $image->id,
-                'image_path'    => $image->image_path,
+            $images = $project->noteImages->map(fn($image) => [
+                'id' => $image->id,
+                'image_path' => $image->image_path,
                 'display_order' => $image->display_order,
             ])->toArray();
 
@@ -1294,10 +1227,14 @@ class ProjectProposalController extends Controller
     public function updateBeneficiaries(Request $request, int $id): JsonResponse
     {
         $user = $request->user();
-        if (!$this->hasRole($user, [
-            UserRole::ADMIN, UserRole::PROJECT_MANAGER,
-            UserRole::EXECUTED_PROJECTS_COORDINATOR, UserRole::ORPHAN_SPONSOR_COORDINATOR,
-        ])) {
+        if (
+            !$this->hasRole($user, [
+                UserRole::ADMIN,
+                UserRole::PROJECT_MANAGER,
+                UserRole::EXECUTED_PROJECTS_COORDINATOR,
+                UserRole::ORPHAN_SPONSOR_COORDINATOR,
+            ])
+        ) {
             return $this->unauthorizedResponse('ليس لديك صلاحيات لتحديث المستفيدين');
         }
 
@@ -1361,7 +1298,7 @@ class ProjectProposalController extends Controller
 
             $this->service->applyAdvancedSearchFilters($query, $request);
 
-            $sortBy    = $request->get('sort_by', 'created_at');
+            $sortBy = $request->get('sort_by', 'created_at');
             $sortOrder = $request->get('sort_order', 'desc');
             $allowedSortFields = ['created_at', 'updated_at', 'project_name', 'status', 'execution_date', 'montage_completed_date'];
 
@@ -1372,7 +1309,7 @@ class ProjectProposalController extends Controller
             }
 
             $perPage = min(max(1, (int) $request->get('per_page', 15)), 200);
-            $page    = max(1, (int) $request->get('page', 1));
+            $page = max(1, (int) $request->get('page', 1));
 
             $query->with([
                 'currency:id,currency_code,currency_name_ar',
@@ -1389,24 +1326,24 @@ class ProjectProposalController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data'    => [
-                    'projects'   => collect($projects->items())->map(
-                        fn ($p) => $this->ensureNumericTypes($p->toArray())
+                'data' => [
+                    'projects' => collect($projects->items())->map(
+                        fn($p) => $this->ensureNumericTypes($p->toArray())
                     )->all(),
                     'pagination' => [
                         'current_page' => $projects->currentPage(),
-                        'last_page'    => $projects->lastPage(),
-                        'per_page'     => $projects->perPage(),
-                        'total'        => $projects->total(),
-                        'from'         => $projects->firstItem(),
-                        'to'           => $projects->lastItem(),
+                        'last_page' => $projects->lastPage(),
+                        'per_page' => $projects->perPage(),
+                        'total' => $projects->total(),
+                        'from' => $projects->firstItem(),
+                        'to' => $projects->lastItem(),
                     ],
                 ],
             ], 200);
         } catch (\Exception $e) {
             Log::error('Advanced search error', [
-                'error'   => $e->getMessage(),
-                'trace'   => $e->getTraceAsString(),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
                 'user_id' => $user->id ?? null,
             ]);
 
@@ -1423,11 +1360,21 @@ class ProjectProposalController extends Controller
 
         try {
             $project = ProjectProposal::with([
-                'currency', 'shelter', 'projectType', 'subcategory',
-                'assignedToTeam', 'assignedResearcher', 'photographer',
-                'assignedMontageProducer', 'assignedBy', 'creator',
-                'parentProject', 'executedProject',
-                'surplusRecorder', 'surplusCategory', 'sponsoredOrphans',
+                'currency',
+                'shelter',
+                'projectType',
+                'subcategory',
+                'assignedToTeam',
+                'assignedResearcher',
+                'photographer',
+                'assignedMontageProducer',
+                'assignedBy',
+                'creator',
+                'parentProject',
+                'executedProject',
+                'surplusRecorder',
+                'surplusCategory',
+                'sponsoredOrphans',
             ])->find($id);
 
             if (!$project) {
@@ -1460,26 +1407,26 @@ class ProjectProposalController extends Controller
             $warehouseItems = $project->warehouseItems()->with('warehouseItem')->get();
 
             $additionalInfo = [
-                'has_warehouse_items'              => $warehouseItems->isNotEmpty(),
-                'confirmed_warehouse_items_count'  => $project->confirmedWarehouseItems()->count(),
-                'pending_warehouse_items_count'    => $project->pendingWarehouseItems()->count(),
-                'has_beneficiaries_file'           => $project->hasBeneficiariesFile(),
-                'beneficiaries_count_from_db'      => $project->beneficiaries()->count(),
-                'is_parent_project'                => $project->isParentProject(),
-                'is_sponsorship_project'           => $project->isSponsorshipProject(),
-                'has_surplus_recorded'             => !is_null($project->surplus_recorded_at),
-                'has_shekel_conversion'            => $project->hasShekelConversion(),
-                'days_since_creation'              => $project->getDaysSinceCreation(),
-                'days_since_assignment'            => $project->getDaysSinceAssignment(),
+                'has_warehouse_items' => $warehouseItems->isNotEmpty(),
+                'confirmed_warehouse_items_count' => $project->confirmedWarehouseItems()->count(),
+                'pending_warehouse_items_count' => $project->pendingWarehouseItems()->count(),
+                'has_beneficiaries_file' => $project->hasBeneficiariesFile(),
+                'beneficiaries_count_from_db' => $project->beneficiaries()->count(),
+                'is_parent_project' => $project->isParentProject(),
+                'is_sponsorship_project' => $project->isSponsorshipProject(),
+                'has_surplus_recorded' => !is_null($project->surplus_recorded_at),
+                'has_shekel_conversion' => $project->hasShekelConversion(),
+                'days_since_creation' => $project->getDaysSinceCreation(),
+                'days_since_assignment' => $project->getDaysSinceAssignment(),
             ];
 
             return response()->json([
                 'success' => true,
-                'data'    => [
-                    'project'         => $this->ensureNumericTypes($project->toArray()),
-                    'timeline'        => $timeline,
-                    'daily_phases'    => $dailyPhases,
-                    'monthly_phases'  => $monthlyPhases,
+                'data' => [
+                    'project' => $this->ensureNumericTypes($project->toArray()),
+                    'timeline' => $timeline,
+                    'daily_phases' => $dailyPhases,
+                    'monthly_phases' => $monthlyPhases,
                     'warehouse_items' => $warehouseItems,
                     'additional_info' => $additionalInfo,
                 ],
@@ -1523,7 +1470,7 @@ class ProjectProposalController extends Controller
 
         try {
             $newStatus = $request->input('status');
-            $note      = $request->input('note', '');
+            $note = $request->input('note', '');
 
             $result = $this->advancedUpdateService->changeStatus($id, $newStatus, $note, $user, $request);
 
@@ -1534,7 +1481,7 @@ class ProjectProposalController extends Controller
             $this->clearProjectsCache();
             return $this->successResponse([
                 'data' => [
-                    'project'    => $result['data'],
+                    'project' => $result['data'],
                     'old_status' => $result['old_status'],
                     'new_status' => $result['new_status'],
                 ],

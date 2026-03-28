@@ -200,6 +200,7 @@ function App() {
               <Route path="/media-management/dashboard" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><MediaDashboard /></Base></Suspense> } /> } />
               <Route path="/media-management/new-projects" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><MediaNewProjects /></Base></Suspense> } /> } />
               <Route path="/media-management/projects" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><MediaProjectsList /></Base></Suspense> } /> } />
+              <Route path="/media-management/projects/finished" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><MediaProjectsList /></Base></Suspense> } /> } />
               <Route path="/media-management/projects/:id" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><PMProjectDetails /></Base></Suspense> } /> } />
               <Route path="/media-management/reports" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><MediaReports /></Base></Suspense> } /> } />
               <Route path="/media-management/photographers-stats" element={ <PrivateRoute element={ <Suspense fallback={ <SkeletonLoader width="100%" height="100vh" /> }><Base><PhotographersStats /></Base></Suspense> } /> } />

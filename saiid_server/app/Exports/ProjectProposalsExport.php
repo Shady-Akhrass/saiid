@@ -9,6 +9,9 @@ use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Concerns\WithColumnWidths;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use Illuminate\Http\Request;
+use App\Models\User;
+use App\Services\ProjectProposalQuery;
 
 class ProjectProposalsExport implements FromCollection, WithHeadings, WithMapping, WithColumnWidths, WithStyles
 {
@@ -16,17 +19,23 @@ class ProjectProposalsExport implements FromCollection, WithHeadings, WithMappin
     protected $endDate;
     protected $statuses;
     protected $projectType;
+    protected $user;
+    protected $queryService;
+    protected $finishedOnly;
 
     /** عند تمرير مجموعة مسبقة التحميل (مثلاً من تصدير الإشراف) تُستخدم بدلاً من بناء الاستعلام */
     protected $preloadedCollection;
 
-    public function __construct($startDate = null, $endDate = null, $statuses = null, $projectType = null, $preloadedCollection = null)
+    public function __construct($startDate = null, $endDate = null, $statuses = null, $projectType = null, $preloadedCollection = null, $user = null, $queryService = null, $finishedOnly = false)
     {
         $this->startDate = $startDate;
         $this->endDate = $endDate;
         $this->statuses = $statuses;
         $this->projectType = $projectType;
         $this->preloadedCollection = $preloadedCollection;
+        $this->user = $user;
+        $this->queryService = $queryService ?? app(ProjectProposalQuery::class);
+        $this->finishedOnly = $finishedOnly;
     }
 
     /**
@@ -37,61 +46,37 @@ class ProjectProposalsExport implements FromCollection, WithHeadings, WithMappin
         if ($this->preloadedCollection !== null) {
             return $this->preloadedCollection;
         }
-        // ✅ إصلاح: استخدام select محدد للعلاقات لتجنب أخطاء الأعمدة غير الموجودة
-        // ✅ إضافة select صريح لضمان جلب quantity وجميع الحقول المطلوبة
-        $query = ProjectProposal::select([
-            'id', 'serial_number', 'donor_code', 'project_name', 'project_description',
-            'donor_name', 'project_type', 'project_type_id', 'subcategory_id', 'donation_amount',
-            'currency_id', 'exchange_rate', 'amount_in_usd', 'admin_discount_percentage',
-            'discount_amount', 'net_amount', 'shekel_exchange_rate', 'net_amount_shekel',
-            'quantity', 'beneficiaries_count', 'beneficiaries_per_unit', 'unit_cost',
-            'supply_cost', 'surplus_amount', 'has_deficit', 'estimated_duration_days',
-            'status', 'assigned_to_team_id', 'assigned_researcher_id', 'assigned_photographer_id',
-            'assigned_montage_producer_id', 'shelter_id', 'execution_date', 'created_at',
-            'montage_completed_date', 'sent_to_donor_date', 'completed_date', 'notes',
-            // Only include fields that actually exist in database
-            'is_divided_into_phases', 'phase_duration_days', 'phase_start_date',
-            'parent_project_id', 'phase_day', 'is_daily_phase'
-        ])->with([
-            'currency:id,currency_code,currency_name_ar,exchange_rate_to_usd',
-            'assignedToTeam:id,team_name,team_leader_name',
-            'photographer:id,name,phone_number',
-            'researcher:id,name,phone_number',
-            'creator:id,name,phone_number',
-            // ✅ إصلاح: استخدام closure لتحديد select بشكل صحيح (جدول shelters لا يحتوي على id أو name)
-            'shelter' => function($query) {
-                $query->select('manager_id_number', 'camp_name', 'governorate', 'district');
-            },
-        ]);
 
-        // Filter by date range
+        // Build request from parameters for the query service
+        $request = new Request();
         if ($this->startDate) {
-            $query->whereDate('created_at', '>=', $this->startDate);
+            $request->merge(['start_date' => $this->startDate]);
         }
-
         if ($this->endDate) {
-            $query->whereDate('created_at', '<=', $this->endDate);
+            $request->merge(['end_date' => $this->endDate]);
         }
-
-        // Filter by multiple statuses
-        if ($this->statuses && is_array($this->statuses) && count($this->statuses) > 0) {
-            // إزالة القيم الفارغة من المصفوفة
-            $statuses = array_filter($this->statuses, function($status) {
-                return !empty($status) && $status !== 'all' && $status !== 'الكل';
-            });
-            
-            if (count($statuses) > 0) {
-                $query->whereIn('status', $statuses);
-            }
-        } elseif ($this->statuses && is_string($this->statuses) && $this->statuses !== 'all' && $this->statuses !== 'الكل') {
-            // دعم حالة واحدة كسلسلة نصية للتوافق مع الكود القديم
-            $query->where('status', $this->statuses);
+        if ($this->statuses) {
+            $request->merge(['status' => (array)$this->statuses]);
         }
-
-        // Filter by project type
         if ($this->projectType) {
-            $query->where('project_type', $this->projectType);
+            $request->merge(['project_type' => $this->projectType]);
         }
+        
+        // Use ProjectProposalQuery service to build consistent query
+        // This handles role-based filtering, status filtering, and finishedOnly state
+        $user = $this->user ?? new \App\Models\User(['role' => 'admin', 'id' => 7]);
+        $query = $this->queryService->buildListQuery($request, $user, $this->finishedOnly);
+
+        // Load additional relationships needed for export 
+        // We include a comprehensive list to ensure Excel has all data
+        $query->with([
+            'currency',
+            'assignedToTeam',
+            'photographer',
+            'researcher',
+            'creator',
+            'shelter'
+        ]);
 
         return $query->orderBy('created_at', 'DESC')->get();
     }

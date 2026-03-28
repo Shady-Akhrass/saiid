@@ -192,7 +192,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         // ✅ التعديل: target يشير للسيرفر الحقيقي بدلاً من localhost
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,
@@ -221,7 +221,7 @@ export default defineConfig({
       // ✅ Proxy للصور (project_notes_images)
       '/project_notes_images': {
         // ✅ التعديل: target يشير للسيرفر الحقيقي
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,
@@ -251,7 +251,7 @@ export default defineConfig({
       },
       // ✅ Proxy للصور (orphan_photos)
       '/orphan_photos': {
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,
@@ -281,7 +281,7 @@ export default defineConfig({
       // ✅ Proxy للمسارات الأخرى (storage)
       '/storage': {
         // ✅ التعديل: target يشير للسيرفر الحقيقي
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,
@@ -301,7 +301,7 @@ export default defineConfig({
       },
       '/public': {
         // ✅ التعديل: target يشير للسيرفر الحقيقي
-        target: 'https://forms-api.saiid.org',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path,

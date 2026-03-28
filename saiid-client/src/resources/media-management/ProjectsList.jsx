@@ -63,6 +63,8 @@ const MediaProjectsList = () => {
   const [projects, setProjects] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [producerInfo, setProducerInfo] = useState(null); // ✅ معلومات المنتج إذا كان محدداً
+  const isFinishedProjectsPage = window.location.pathname.includes('/projects/finished');
+  const [isExporting, setIsExporting] = useState(false);
 
   // ✅ تهيئة الـ cache عند التحميل
   useEffect(() => {
@@ -76,9 +78,9 @@ const MediaProjectsList = () => {
     if (producerId && producerInfo) {
       document.title = `مشاريع الممنتج: ${producerInfo.name || producerInfo.email || 'غير محدد'}`;
     } else {
-      document.title = 'مشاريع قسم الإعلام';
+      document.title = isFinishedProjectsPage ? 'المشاريع المنتهية - قسم الإعلام' : 'مشاريع قسم الإعلام';
     }
-  }, [producerId, producerInfo]);
+  }, [producerId, producerInfo, isFinishedProjectsPage]);
 
   // ✅ الاستماع إلى أحداث إبطال الكاش
   useEffect(() => {
@@ -709,7 +711,6 @@ const MediaProjectsList = () => {
 
     fetchFilterLists();
   }, [showFilters, producerId]);
-
   // ✅ إغلاق القوائم المنسدلة عند الضغط خارجها
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -729,6 +730,50 @@ const MediaProjectsList = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // ✅ دالة تصدير المشاريع
+  const handleExport = async () => {
+    try {
+      setIsExporting(true);
+      const params = new URLSearchParams();
+      
+      // إضافة الفلاتر الحالية للتحويل
+      if (appliedFilters.execution_date_from) params.append('start_date', appliedFilters.execution_date_from);
+      if (appliedFilters.execution_date_to) params.append('end_date', appliedFilters.execution_date_to);
+      if (isFinishedProjectsPage) {
+          params.append('finished_only', 'true');
+      }
+      
+      // إضافة نوع المشروع إذا كان محدداً
+      if (Array.isArray(appliedFilters.project_type) && appliedFilters.project_type.length > 0) {
+          params.append('project_type', appliedFilters.project_type.join(','));
+      }
+
+      // إضافة الحالات إذا كانت محددة
+      if (Array.isArray(appliedFilters.montage_status) && appliedFilters.montage_status.length > 0) {
+          params.append('statuses', appliedFilters.montage_status.join(','));
+      }
+      
+      const response = await apiClient.get(`/project-proposals/export?${params.toString()}`, {
+        responseType: 'blob'
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = isFinishedProjectsPage ? 'projects_finished_media_export.xlsx' : 'projects_active_media_export.xlsx';
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast.success('تم تصدير المشاريع بنجاح');
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('فشل تصدير المشاريع');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const fetchProjects = async (forceRefresh = false) => {
     let loadingTimeout;
@@ -778,8 +823,8 @@ const MediaProjectsList = () => {
         // سنعتمد على نجاح الطلب لاحقاً لإظهار البيانات.
       }, 20000); // timeout 20 ثانية
 
-      // ✅ استخدام endpoint مختلف إذا كان هناك producerId
-      let endpoint = '/project-proposals';
+      // ✅ استخدام endpoint مختلف إذا كان هناك producerId أو إذا كنت في صفحة المنتهية
+      let endpoint = isFinishedProjectsPage ? '/project-proposals/finished' : '/project-proposals';
       const params = new URLSearchParams();
 
       // ✅ دائماً نطلب أكبر عدد ممكن لتقليل عدد طلبات الصفحات
@@ -2425,10 +2470,49 @@ const MediaProjectsList = () => {
               </>
             ) : (
               <>
-                <h1 className="text-3xl font-bold text-gray-800">مشاريع قسم الإعلام</h1>
-                <p className="text-gray-600 mt-1">إدارة ومتابعة مشاريع المونتاج</p>
+                <h1 className="text-3xl font-bold text-gray-800">
+                  { isFinishedProjectsPage ? 'المشاريع المنتهية (الأرشيف)' : 'مشاريع قسم الإعلام' }
+                </h1>
+                <p className="text-gray-600 mt-1">
+                  { isFinishedProjectsPage ? 'عرض وتصدير المشاريع التي اكتملت دورتها تماماً' : 'إدارة ومتابعة مشاريع المونتاج والتنفيذ' }
+                </p>
               </>
             ) }
+          </div>
+
+          <div className="flex items-center gap-3">
+             {/* ✅ زر التصدير */}
+             <button
+              onClick={handleExport}
+              disabled={isExporting || projects.length === 0}
+              className={`px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md hover:shadow-lg ${
+                isExporting 
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                  : 'bg-white text-green-700 border-2 border-green-200 hover:bg-green-50'
+              }`}
+            >
+              {isExporting ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600"></div>
+              ) : (
+                <Download className="w-5 h-5" />
+              )}
+              {isExporting ? 'جاري التصدير...' : 'تصدير إكسل'}
+            </button>
+
+            {/* ✅ زر الانتقال بين النشطة والمنتهية */}
+            { !producerId && (
+              <Link
+                to={isFinishedProjectsPage ? "/media-management/projects" : "/media-management/projects/finished"}
+                className={`px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md hover:shadow-lg ${
+                  isFinishedProjectsPage 
+                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white hover:from-sky-600 hover:to-blue-700' 
+                    : 'bg-white text-gray-700 border-2 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <ChevronLeft className={`w-5 h-5 transition-transform ${isFinishedProjectsPage ? 'rotate-180' : ''}`} />
+                {isFinishedProjectsPage ? 'عرض المشاريع النشطة' : 'عرض المشاريع المنتهية'}
+              </Link>
+            )}
           </div>
         </div>
 

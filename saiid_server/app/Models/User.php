@@ -55,7 +55,7 @@ class User extends Authenticatable
      */
     public function ledTeams()
     {
-        return $this->hasMany(Team::class, 'team_leader_id');
+        return $this->hasMany(Team::class , 'team_leader_id');
     }
 
     /**
@@ -63,9 +63,9 @@ class User extends Authenticatable
      */
     public function teams()
     {
-        return $this->belongsToMany(Team::class, 'team_members', 'user_id', 'team_id')
-                    ->withPivot('role_in_team', 'is_active')
-                    ->withTimestamps();
+        return $this->belongsToMany(Team::class , 'team_members', 'user_id', 'team_id')
+            ->withPivot('role_in_team', 'is_active')
+            ->withTimestamps();
     }
 
     /**
@@ -73,7 +73,7 @@ class User extends Authenticatable
      */
     public function createdProjects()
     {
-        return $this->hasMany(ProjectProposal::class, 'created_by');
+        return $this->hasMany(ProjectProposal::class , 'created_by');
     }
 
     /**
@@ -81,7 +81,7 @@ class User extends Authenticatable
      */
     public function assignedProjects()
     {
-        return $this->hasMany(ProjectProposal::class, 'assigned_by');
+        return $this->hasMany(ProjectProposal::class , 'assigned_by');
     }
 
     /**
@@ -89,7 +89,7 @@ class User extends Authenticatable
      */
     public function photographyProjects()
     {
-        return $this->hasMany(ProjectProposal::class, 'assigned_photographer_id');
+        return $this->hasMany(ProjectProposal::class , 'assigned_photographer_id');
     }
 
     /**
@@ -97,7 +97,7 @@ class User extends Authenticatable
      */
     public function notifications()
     {
-        return $this->hasMany(Notification::class, 'user_id');
+        return $this->hasMany(Notification::class , 'user_id');
     }
 
     /**
@@ -105,7 +105,7 @@ class User extends Authenticatable
      */
     public function unreadNotifications()
     {
-        return $this->hasMany(Notification::class, 'user_id')->where('is_read', false);
+        return $this->hasMany(Notification::class , 'user_id')->where('is_read', false);
     }
 
     /**
@@ -113,7 +113,7 @@ class User extends Authenticatable
      */
     public function addedUsers()
     {
-        return $this->hasMany(User::class, 'added_by');
+        return $this->hasMany(User::class , 'added_by');
     }
 
     /**
@@ -121,7 +121,7 @@ class User extends Authenticatable
      */
     public function addedBy()
     {
-        return $this->belongsTo(User::class, 'added_by');
+        return $this->belongsTo(User::class , 'added_by');
     }
 
     // ==================== Helper Methods ====================
@@ -187,7 +187,7 @@ class User extends Authenticatable
      */
     public function montageProducerProjects()
     {
-        return $this->hasMany(ProjectProposal::class, 'assigned_montage_producer_id');
+        return $this->hasMany(ProjectProposal::class , 'assigned_montage_producer_id');
     }
 
     /**
