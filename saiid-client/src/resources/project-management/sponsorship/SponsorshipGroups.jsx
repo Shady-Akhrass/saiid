@@ -59,8 +59,9 @@ const SponsorshipGroups = () => {
   const [expandedGroups, setExpandedGroups] = useState({});
   const [groupItems, setGroupItems] = useState({});
   const [loadingGroupItems, setLoadingGroupItems] = useState({});
+  const [currencies, setCurrencies] = useState([]);
 
-  useEffect(() => { fetchGroups(); fetchProjectTypes(); }, []);
+  useEffect(() => { fetchGroups(); fetchProjectTypes(); fetchCurrencies(); }, []);
 
   const fetchGroups = async () => {
     setLoading(true);
@@ -83,6 +84,24 @@ const SponsorshipGroups = () => {
       }
     } catch (err) {
       console.warn('Could not fetch project types');
+    }
+  };
+
+  const fetchCurrencies = async () => {
+    try {
+      const res = await apiClient.get('/currencies', {
+        params: { per_page: 1000, include_inactive: false, _t: Date.now() },
+        timeout: 20000,
+      });
+      if (res.data.success) {
+        const data = res.data.currencies || res.data.data || [];
+        setCurrencies(data.filter(c => c.is_active));
+      }
+    } catch (err) {
+      setCurrencies([
+        { id: 1, currency_name: 'دولار أمريكي', currency_code: 'USD', symbol: '$', exchange_rate_to_usd: 1.00, is_active: true },
+        { id: 2, currency_name: 'يورو', currency_code: 'EUR', symbol: '€', exchange_rate_to_usd: 1.08, is_active: true },
+      ]);
     }
   };
 
@@ -179,6 +198,16 @@ const SponsorshipGroups = () => {
         setGroupItems(prev => ({ ...prev, [groupId]: res.data.data || [] }));
       }
     } catch (err) { }
+  };
+
+  const calculateTotalUSD = () => {
+    const selectedItems = (groupItems[projectModalGroupId] || []).filter(item => 
+      projectFormData.sponsorship_item_ids.includes(String(item.id))
+    );
+    
+    return selectedItems.reduce((total, item) => {
+      return total + parseFloat(item.amount_in_usd || 0);
+    }, 0);
   };
 
   const openProjectModal = async (groupId) => {
@@ -671,6 +700,63 @@ const SponsorshipGroups = () => {
                   }
                 </p>
               </div>
+
+              {/* Currency Exchange Summary */}
+              {projectFormData.sponsorship_item_ids.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+                  <h4 className="font-semibold text-blue-900 text-sm">ملخص العملات</h4>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="bg-white rounded-lg p-3 shadow">
+                      <p className="text-gray-600 mb-1">عدد المشاريع</p>
+                      <p className="text-lg font-bold text-blue-600">
+                        {projectFormData.sponsorship_item_ids.length}
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 shadow">
+                      <p className="text-gray-600 mb-1">إجمالي بالدولار</p>
+                      <p className="text-lg font-bold text-green-600">
+                        ${calculateTotalUSD().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-lg p-3 shadow">
+                    <p className="text-gray-600 mb-2">تفصيل العملات:</p>
+                    <div className="space-y-1">
+                      {(() => {
+                        const selectedItems = (groupItems[projectModalGroupId] || []).filter(item => 
+                          projectFormData.sponsorship_item_ids.includes(String(item.id))
+                        );
+                        const currencyGroups = {};
+                        
+                        selectedItems.forEach(item => {
+                          const currency = item.currency || {};
+                          const key = `${currency.currency_code || 'USD'}-${currency.symbol || '$'}`;
+                          if (!currencyGroups[key]) {
+                            currencyGroups[key] = {
+                              code: currency.currency_code || 'USD',
+                              symbol: currency.symbol || '$',
+                              exchange_rate: currency.exchange_rate_to_usd || 1,
+                              total: 0
+                            };
+                          }
+                          currencyGroups[key].total += parseFloat(item.cost || 0);
+                        });
+                        
+                        return Object.values(currencyGroups).map(curr => (
+                          <div key={curr.code} className="flex justify-between items-center text-xs">
+                            <span className="text-gray-700">
+                              {curr.symbol} {curr.code}: {curr.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </span>
+                            <span className="text-gray-500">
+                              (سعر الصرف: {curr.exchange_rate} = ${(curr.total * curr.exchange_rate).toLocaleString(undefined, { minimumFractionDigits: 2 })})
+                            </span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700">
                 سيتم إنشاء مشروع منفصل لكل كفالة في هذه المجموعة مع البيانات المالية الخاصة بها.

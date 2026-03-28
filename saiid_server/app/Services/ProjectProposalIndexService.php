@@ -274,7 +274,7 @@ class ProjectProposalIndexService
         // ✅ إخفاء مشاريع الكفالة عن مدير المشاريع في صفحة المشاريع العامة
         $query->where(function ($q) {
             $q->where('project_type', '!=', 'الكفالات')
-              ->orWhereNull('project_type');
+                ->orWhereNull('project_type');
         });
     }
 
@@ -343,10 +343,10 @@ class ProjectProposalIndexService
                     $sub->whereNull('parent_project_id')
                         ->where(function ($divided) {
                             $divided->where('is_divided_into_phases', false)
-                                    ->orWhereNull('is_divided_into_phases');
+                                ->orWhereNull('is_divided_into_phases');
                         });
                 })
-                ->orWhereNotNull('parent_project_id');
+                    ->orWhereNotNull('parent_project_id');
             });
 
             // ✅ تطبيق فلترة الحالة لضمان ظهور المشاريع النشطة فقط (سواء كانت أب أو ابن)
@@ -550,14 +550,18 @@ class ProjectProposalIndexService
                 'parentProject.currency:id,currency_code,currency_name_ar'
             ]);
 
-        if ($finishedOnly) {
-            $query->where('status', self::STATUS_COMPLETED);
-        } else {
-            // ✅ للهيبة الإدارية: منع ظهور المشاريع المنتهية في الصفحة الرئيسية حتى في الاستعلام المبسط
-            $query->where('status', '!=', self::STATUS_COMPLETED);
+        // ✅ تطبيق الفلاتر الخاصة بالأدوار (لضمان إخفاء الأبناء/الآباء حسب الحاجة)
+        $this->applyRoleBasedFilters($query, $request, $user, $userRole, $finishedOnly);
+
+        // ✅ تطبيق الفلاتر العامة (البحث، التاريخ، إلخ)
+        $this->applyCommonFilters($query, $request, $userRole, $finishedOnly);
+
+        // ✅ إضافة الترتيب الافتراضي إذا لم يتم تحديده
+        if (!$request->has('sort_by')) {
+            $query->orderBy('created_at', 'DESC');
         }
 
-        return $query->orderBy('created_at', 'DESC');
+        return $query;
     }
 
     private function applySorting(Builder $query, Request $request, string $userRole): void

@@ -39,10 +39,15 @@ const SponsorshipItems = () => {
   const [donorCodeManual, setDonorCodeManual] = useState(false);
 
   const generateDonorCode = (name, existingItems, currentItemId = null) => {
-    if (!name || !name.trim()) return '';
-    const trimmed = name.trim();
-    // lowercase prefix
-    const prefix = 's-' + trimmed.slice(0, 2).toLowerCase();
+    // Get first two letters from project name (group name)
+    let projectPrefix = '';
+    if (group && group.name && group.name.trim()) {
+      projectPrefix = group.name.trim().slice(0, 2).toLowerCase();
+    }
+    
+    // Format: s-{project_first_two}-{sequence}
+    const prefix = projectPrefix ? 's-' + projectPrefix : 's';
+    
     // Count existing items with same prefix (excluding current if editing)
     const existing = (existingItems || []).filter(it => {
       if (currentItemId && it.id === currentItemId) return false;

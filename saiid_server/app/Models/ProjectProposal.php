@@ -242,10 +242,10 @@ class ProjectProposal extends Model
             if ($model->isDirty('status')) {
                 $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 15);
                 $caller = $backtrace[8] ?? $backtrace[5] ?? $backtrace[3] ?? $backtrace[0];
-                
+
                 $oldStatus = $model->getOriginal('status');
                 $newStatus = $model->status;
-                
+
                 Log::info('⚠️ PROJECT_STATUS_CHANGED_IN_MODEL', [
                     'project_id' => $model->id,
                     'donor_code' => $model->donor_code,
@@ -256,7 +256,7 @@ class ProjectProposal extends Model
                     'caller_function' => $caller['function'] ?? 'unknown',
                     'timestamp' => now()->toDateTimeString()
                 ]);
-                
+
                 // ✅ حماية: منع تغيير الحالة تلقائياً من "قيد التنفيذ" إلى "تم التنفيذ"
                 // ✅ الحالة "قيد التنفيذ" يجب أن تبقى حتى يغيرها مدير المشاريع أو مدير الإعلام فقط
                 if ($oldStatus === 'قيد التنفيذ' && $newStatus === 'تم التنفيذ') {
@@ -266,14 +266,14 @@ class ProjectProposal extends Model
                         'markAsExecuted',
                         'update',
                     ];
-                    
+
                     $callerFunction = $caller['function'] ?? '';
                     $callerFile = $caller['file'] ?? '';
-                    
+
                     // ✅ التحقق من أن الاستدعاء جاء من Controller وليس من observer أو cron job
                     $isFromController = strpos($callerFile, 'Controller.php') !== false;
                     $isAllowedFunction = in_array($callerFunction, $allowedCallers) || strpos($callerFunction, 'update') !== false;
-                    
+
                     if (!$isFromController || !$isAllowedFunction) {
                         Log::error('❌ UNAUTHORIZED_STATUS_CHANGE_FROM_IN_PROGRESS_TO_EXECUTED', [
                             'project_id' => $model->id,
@@ -286,7 +286,7 @@ class ProjectProposal extends Model
                             'is_allowed_function' => $isAllowedFunction,
                             'warning' => 'تم منع تغيير الحالة تلقائياً - يجب أن يتم التغيير من قبل مدير المشاريع أو مدير الإعلام فقط'
                         ]);
-                        
+
                         // ✅ إعادة الحالة إلى "قيد التنفيذ"
                         DB::table('project_proposals')
                             ->where('id', $model->id)
@@ -294,10 +294,10 @@ class ProjectProposal extends Model
                                 'status' => 'قيد التنفيذ',
                                 'updated_at' => now()
                             ]);
-                        
+
                         // ✅ إعادة تحميل الحالة الصحيحة
                         $model->refresh();
-                        
+
                         Log::info('✅ STATUS_REVERTED_TO_IN_PROGRESS', [
                             'project_id' => $model->id,
                             'final_status' => $model->status
@@ -305,7 +305,7 @@ class ProjectProposal extends Model
                     }
                 }
             }
-            
+
             // ✅ حماية: عندما transferred_to_projects يصبح 1، يجب أن تكون الحالة "قيد التنفيذ" وليس "تم التنفيذ"
             if ($model->isDirty('transferred_to_projects') && $model->transferred_to_projects == 1) {
                 Log::info('🟡 TRANSFERRED_TO_PROJECTS_CHANGED', [
@@ -315,7 +315,7 @@ class ProjectProposal extends Model
                     'current_status' => $model->status,
                     'expected_status' => 'قيد التنفيذ'
                 ]);
-                
+
                 // ✅ إذا كانت الحالة "تم التنفيذ" أو أي حالة أخرى غير "قيد التنفيذ"، نصححها
                 if ($model->status !== 'قيد التنفيذ') {
                     Log::warning('⚠️ CORRECTING_STATUS_AFTER_TRANSFER', [
@@ -326,7 +326,7 @@ class ProjectProposal extends Model
                         'transferred_to_projects' => $model->transferred_to_projects,
                         'reason' => 'عندما transferred_to_projects = 1، يجب أن تكون الحالة "قيد التنفيذ"'
                     ]);
-                    
+
                     // ✅ تحديث مباشر في قاعدة البيانات بدون observers
                     DB::table('project_proposals')
                         ->where('id', $model->id)
@@ -334,10 +334,10 @@ class ProjectProposal extends Model
                             'status' => 'قيد التنفيذ',
                             'updated_at' => now()
                         ]);
-                    
+
                     // ✅ إعادة تحميل الحالة الصحيحة
                     $model->refresh();
-                    
+
                     Log::info('✅ STATUS_CORRECTED_SUCCESSFULLY', [
                         'project_id' => $model->id,
                         'final_status' => $model->status
@@ -349,16 +349,18 @@ class ProjectProposal extends Model
                     ]);
                 }
             }
-            
+
             static::clearProjectsCache();
-            
+
             // ✅ إذا كان المشروع فرعي (daily_phase أو monthly_phase) وتغيرت حالته
             // نتحقق من حالة المشروع الأصلي عند:
             // 1. عندما يصبح "وصل للمتبرع" (للتأكد من تحديث المشروع الأصلي)
             // 2. عندما يصبح "منتهى" (للتأكد من تحديث المشروع الأصلي عند انتهاء جميع المشاريع الفرعية)
-            if (($model->is_daily_phase || $model->is_monthly_phase) && 
-                $model->isDirty('status') && 
-                ($model->status === 'وصل للمتبرع' || $model->status === 'منتهي')) {
+            if (
+                ($model->is_daily_phase || $model->is_monthly_phase) &&
+                $model->isDirty('status') &&
+                ($model->status === 'وصل للمتبرع' || $model->status === 'منتهي')
+            ) {
                 $model->updateParentProjectStatus();
             }
         });
@@ -427,16 +429,16 @@ class ProjectProposal extends Model
             // إذا كان خطأ آخر (مثل جدول غير موجود)، نرمي exception عام
             throw new \Exception('خطأ في التحقق من وجود حقل internal_code: ' . $e->getMessage());
         }
-        
+
         $currentYear = (int) Carbon::now()->format('y'); // 2-digit year (25, 26, etc.)
         $yearPrefix = str_pad($currentYear, 2, '0', STR_PAD_LEFT);
-        
+
         // البحث عن آخر كود داخلي في نفس السنة
         $lastInternalCode = self::where('internal_code', 'like', $yearPrefix . '%')
             ->whereNotNull('internal_code')
             ->orderBy('internal_code', 'desc')
             ->value('internal_code');
-        
+
         if ($lastInternalCode && strlen($lastInternalCode) === 7) {
             // استخراج الرقم التسلسلي من آخر كود (آخر 5 أرقام)
             $lastSequence = (int) substr($lastInternalCode, 2);
@@ -445,20 +447,20 @@ class ProjectProposal extends Model
             // إذا لم يكن هناك كود في هذه السنة، نبدأ من 1
             $nextSequence = 1;
         }
-        
+
         // التأكد من أن الرقم التسلسلي لا يتجاوز 5 أرقام (99999)
         if ($nextSequence > 99999) {
             throw new \Exception('تم الوصول إلى الحد الأقصى للأكواد الداخلية لهذه السنة (99999)');
         }
-        
+
         // دمج السنة مع الرقم التسلسلي (7 أرقام: 2 للسنة + 5 للرقم)
         $internalCode = $yearPrefix . str_pad($nextSequence, 5, '0', STR_PAD_LEFT);
-        
+
         // ✅ التأكد من أن الكود بالضبط 7 أرقام
         if (strlen($internalCode) !== 7) {
             throw new \Exception('الكود الداخلي المولد غير صحيح: ' . $internalCode . ' (الطول: ' . strlen($internalCode) . ')');
         }
-        
+
         // التأكد من أن الكود فريد (double-check لتجنب race conditions)
         $maxAttempts = 10;
         $attempts = 0;
@@ -468,24 +470,24 @@ class ProjectProposal extends Model
                 throw new \Exception('تم الوصول إلى الحد الأقصى للأكواد الداخلية لهذه السنة');
             }
             $internalCode = $yearPrefix . str_pad($nextSequence, 5, '0', STR_PAD_LEFT);
-            
+
             // ✅ التأكد مرة أخرى من الطول
             if (strlen($internalCode) !== 7) {
                 throw new \Exception('الكود الداخلي المولد غير صحيح: ' . $internalCode);
             }
-            
+
             $attempts++;
         }
-        
+
         if ($attempts >= $maxAttempts) {
             throw new \Exception('فشل في توليد كود داخلي فريد بعد عدة محاولات');
         }
-        
+
         // ✅ التأكد النهائي من الطول قبل الإرجاع
         if (strlen($internalCode) !== 7) {
             throw new \Exception('الكود الداخلي النهائي غير صحيح: ' . $internalCode);
         }
-        
+
         return $internalCode;
     }
 
@@ -503,17 +505,17 @@ class ProjectProposal extends Model
             ]);
             return;
         }
-        
+
         // حساب المبلغ بالدولار
         $this->amount_in_usd = round($this->donation_amount * $this->exchange_rate, 2);
-        
+
         // حساب الخصم (إذا كان admin_discount_percentage موجوداً، وإلا 0)
         $discountPercentage = $this->admin_discount_percentage ?? 0;
         $this->discount_amount = round($this->amount_in_usd * ($discountPercentage / 100), 2);
-        
+
         // حساب المبلغ الصافي
         $this->net_amount = round($this->amount_in_usd - $this->discount_amount, 2);
-        
+
         // ✅ Log للحسابات (للت debugging)
         \Log::debug('Calculated amounts', [
             'donation_amount' => $this->donation_amount,
@@ -641,13 +643,13 @@ class ProjectProposal extends Model
     public function beforeMontageArchives()
     {
         return $this->hasMany(MediaArchive::class, 'project_proposal_id')
-                    ->where('archive_type', 'before_montage');
+            ->where('archive_type', 'before_montage');
     }
 
     public function afterMontageArchives()
     {
         return $this->hasMany(MediaArchive::class, 'project_proposal_id')
-                    ->where('archive_type', 'after_montage');
+            ->where('archive_type', 'after_montage');
     }
 
     public function beneficiaries()
@@ -686,16 +688,16 @@ class ProjectProposal extends Model
     public function sponsoredOrphans()
     {
         return $this->belongsToMany(Orphan::class, 'orphan_project_proposals', 'project_proposal_id', 'orphan_id_number')
-                    ->withPivot('is_recurring', 'sponsorship_amount', 'sponsorship_start_date', 'sponsorship_end_date', 'notes')
-                    ->withTimestamps();
+            ->withPivot('is_recurring', 'sponsorship_amount', 'sponsorship_start_date', 'sponsorship_end_date', 'notes')
+            ->withTimestamps();
     }
 
     public function recurringOrphans()
     {
         return $this->belongsToMany(Orphan::class, 'orphan_project_proposals', 'project_proposal_id', 'orphan_id_number')
-                    ->wherePivot('is_recurring', true)
-                    ->withPivot('is_recurring', 'sponsorship_amount', 'sponsorship_start_date', 'sponsorship_end_date', 'notes')
-                    ->withTimestamps();
+            ->wherePivot('is_recurring', true)
+            ->withPivot('is_recurring', 'sponsorship_amount', 'sponsorship_start_date', 'sponsorship_end_date', 'notes')
+            ->withTimestamps();
     }
 
     // ==================== Scopes ====================
@@ -723,16 +725,16 @@ class ProjectProposal extends Model
     public function scopeDelayed($query)
     {
         return $query->where('status', 'قيد التنفيذ')
-                     ->whereNotNull('assignment_date')
-                     ->whereNotNull('estimated_duration_days')
-                     ->whereRaw('DATEDIFF(NOW(), assignment_date) > (estimated_duration_days + 2)');
+            ->whereNotNull('assignment_date')
+            ->whereNotNull('estimated_duration_days')
+            ->whereRaw('DATEDIFF(NOW(), assignment_date) > (estimated_duration_days + 2)');
     }
 
     public function scopeMontageDelayed($query)
     {
         return $query->where('status', 'في المونتاج')
-                     ->whereNotNull('media_received_date')
-                     ->whereRaw('DATEDIFF(NOW(), media_received_date) > 5');
+            ->whereNotNull('media_received_date')
+            ->whereRaw('DATEDIFF(NOW(), media_received_date) > 5');
     }
 
     /**
@@ -742,20 +744,20 @@ class ProjectProposal extends Model
      */
     public function scopeForStatistics($query)
     {
-        return $query->where(function($q) {
+        return $query->where(function ($q) {
             // ✅ استبعاد المشاريع المتفرعية (اليومية والشهرية)
             // المشاريع التي تُحسب: المشاريع غير المقسمة + المشاريع الأصلية المقسمة فقط
-            $q->where(function($excludeChildQ) {
+            $q->where(function ($excludeChildQ) {
                 $excludeChildQ
                     // ✅ استبعاد المشاريع اليومية (is_daily_phase = true)
-                    ->where(function($notDailyQ) {
+                    ->where(function ($notDailyQ) {
                         $notDailyQ->where('is_daily_phase', '!=', true)
-                                  ->orWhereNull('is_daily_phase');
+                            ->orWhereNull('is_daily_phase');
                     })
                     // ✅ استبعاد المشاريع الشهرية (is_monthly_phase = true)
-                    ->where(function($notMonthlyQ) {
+                    ->where(function ($notMonthlyQ) {
                         $notMonthlyQ->where('is_monthly_phase', '!=', true)
-                                    ->orWhereNull('is_monthly_phase');
+                            ->orWhereNull('is_monthly_phase');
                     })
                     // ✅ استبعاد أي مشروع له parent_project_id (مشروع فرعي)
                     ->whereNull('parent_project_id')
@@ -774,33 +776,33 @@ class ProjectProposal extends Model
      */
     public function scopeForSurplusStatistics($query)
     {
-        return $query->where(function($q) {
+        return $query->where(function ($q) {
             // ✅ المشاريع الفرعية (اليومية أو الشهرية)
-            $q->where(function($childQ) {
+            $q->where(function ($childQ) {
                 $childQ->where('is_daily_phase', true)
-                       ->orWhere('is_monthly_phase', true)
-                       ->orWhereNotNull('parent_project_id')
-                       ->orWhereNotNull('phase_day')
-                       ->orWhereNotNull('month_number');
+                    ->orWhere('is_monthly_phase', true)
+                    ->orWhereNotNull('parent_project_id')
+                    ->orWhereNotNull('phase_day')
+                    ->orWhereNotNull('month_number');
             })
-            // ✅ أو المشاريع غير المقسمة
-            ->orWhere(function($nonDividedQ) {
-                $nonDividedQ->where(function($dividedCheck) {
-                    $dividedCheck->where('is_divided_into_phases', false)
-                                 ->orWhereNull('is_divided_into_phases');
-                })
-                ->where(function($phaseCheck) {
-                    $phaseCheck->where('is_daily_phase', false)
-                              ->orWhereNull('is_daily_phase');
-                })
-                ->where(function($monthlyCheck) {
-                    $monthlyCheck->where('is_monthly_phase', false)
+                // ✅ أو المشاريع غير المقسمة
+                ->orWhere(function ($nonDividedQ) {
+                    $nonDividedQ->where(function ($dividedCheck) {
+                        $dividedCheck->where('is_divided_into_phases', false)
+                            ->orWhereNull('is_divided_into_phases');
+                    })
+                        ->where(function ($phaseCheck) {
+                            $phaseCheck->where('is_daily_phase', false)
+                                ->orWhereNull('is_daily_phase');
+                        })
+                        ->where(function ($monthlyCheck) {
+                            $monthlyCheck->where('is_monthly_phase', false)
                                 ->orWhereNull('is_monthly_phase');
-                })
-                ->whereNull('parent_project_id')
-                ->whereNull('phase_day')
-                ->whereNull('month_number');
-            });
+                        })
+                        ->whereNull('parent_project_id')
+                        ->whereNull('phase_day')
+                        ->whereNull('month_number');
+                });
         });
     }
 
@@ -820,20 +822,20 @@ class ProjectProposal extends Model
         // 🎯 المنطق: أي مشروع له parent_project_id أو is_monthly_phase أو is_daily_phase ⇒ لا يظهر للإدارة
         if ($user->role === 'admin') {
             // ✅ استبعاد جميع المشاريع الفرعية باستخدام شروط متعددة
-            return $query->where(function($q) {
+            return $query->where(function ($q) {
                 $q->whereNull('parent_project_id')
-                  ->where(function($subQ) {
-                      $subQ->where('is_monthly_phase', false)
-                           ->orWhereNull('is_monthly_phase')
-                           ->orWhere('is_monthly_phase', 0);
-                  })
-                  ->where(function($subQ) {
-                      $subQ->where('is_daily_phase', false)
-                           ->orWhereNull('is_daily_phase')
-                           ->orWhere('is_daily_phase', 0);
-                  })
-                  ->whereNull('month_number')
-                  ->whereNull('phase_day');
+                    ->where(function ($subQ) {
+                        $subQ->where('is_monthly_phase', false)
+                            ->orWhereNull('is_monthly_phase')
+                            ->orWhere('is_monthly_phase', 0);
+                    })
+                    ->where(function ($subQ) {
+                        $subQ->where('is_daily_phase', false)
+                            ->orWhereNull('is_daily_phase')
+                            ->orWhere('is_daily_phase', 0);
+                    })
+                    ->whereNull('month_number')
+                    ->whereNull('phase_day');
             });
         }
 
@@ -842,25 +844,25 @@ class ProjectProposal extends Model
         // **مهم**: استبعاد مشاريع الكفالات (لا يراها project_manager)
         // مشاريع الكفالات: project_type = 'الكفالات' AND subcategory = 'كفالة أيتام'
         if ($user->role === 'project_manager') {
-            return $query->where(function($q) {
-                $q->where(function($subQ) {
+            return $query->where(function ($q) {
+                $q->where(function ($subQ) {
                     // المشاريع غير المقسمة
                     $subQ->where('is_divided_into_phases', false)
-                         ->orWhereNull('is_divided_into_phases');
+                        ->orWhereNull('is_divided_into_phases');
                 })->orWhere('is_daily_phase', true);
             })
-            ->whereIn('status', ['جديد', 'قيد التوريد', 'تم التوريد', 'مسند لباحث', 'جاهز للتنفيذ', 'قيد التنفيذ'])
-            // استبعاد مشاريع الكفالات: project_type = 'الكفالات' AND subcategory = 'كفالة أيتام'
-            ->where(function($q) {
-                $q->where('project_type', '!=', 'الكفالات')
-                  ->orWhereNull('project_type')
-                  ->orWhereDoesntHave('subcategory', function($subQ) {
-                      $subQ->where(function($nameQ) {
-                          $nameQ->where('name_ar', 'كفالة أيتام')
-                                ->orWhere('name', 'Orphan Sponsorship');
-                      });
-                  });
-            });
+                ->whereIn('status', ['جديد', 'قيد التوريد', 'تم التوريد', 'مسند لباحث', 'جاهز للتنفيذ', 'قيد التنفيذ'])
+                // استبعاد مشاريع الكفالات: project_type = 'الكفالات' AND subcategory = 'كفالة أيتام'
+                ->where(function ($q) {
+                    $q->where('project_type', '!=', 'الكفالات')
+                        ->orWhereNull('project_type')
+                        ->orWhereDoesntHave('subcategory', function ($subQ) {
+                            $subQ->where(function ($nameQ) {
+                                $nameQ->where('name_ar', 'كفالة أيتام')
+                                    ->orWhere('name', 'Orphan Sponsorship');
+                            });
+                        });
+                });
         }
 
         // Orphan Sponsor Coordinator يرى: مشاريع الكفالات فقط
@@ -872,50 +874,50 @@ class ProjectProposal extends Model
         // جميع الحالات: جديد، قيد التوريد، تم التوريد، مسند لباحث، جاهز للتنفيذ، قيد التنفيذ، تم التنفيذ، في المونتاج، تم المونتاج، وصل للمتبرع
         if ($user->role === 'orphan_sponsor_coordinator') {
             return $query->where('project_type', 'الكفالات')
-                        ->whereHas('subcategory', function($subQ) {
-                            $subQ->where(function($nameQ) {
-                                $nameQ->where('name_ar', 'كفالة أيتام')
-                                      ->orWhere('name', 'Orphan Sponsorship');
-                            });
+                ->whereHas('subcategory', function ($subQ) {
+                    $subQ->where(function ($nameQ) {
+                        $nameQ->where('name_ar', 'كفالة أيتام')
+                            ->orWhere('name', 'Orphan Sponsorship');
+                    });
+                })
+                ->where(function ($phaseQ) {
+                    // ✅ المشاريع غير المقسمة (parent_project_id IS NULL و is_divided_into_phases = false/NULL)
+                    $phaseQ->where(function ($nonDividedQ) {
+                        $nonDividedQ->where(function ($dividedCheck) {
+                            $dividedCheck->where('is_divided_into_phases', false)
+                                ->orWhereNull('is_divided_into_phases');
                         })
-                        ->where(function($phaseQ) {
-                            // ✅ المشاريع غير المقسمة (parent_project_id IS NULL و is_divided_into_phases = false/NULL)
-                            $phaseQ->where(function($nonDividedQ) {
-                                $nonDividedQ->where(function($dividedCheck) {
-                                    $dividedCheck->where('is_divided_into_phases', false)
-                                                 ->orWhereNull('is_divided_into_phases');
-                                })
-                                ->whereNull('parent_project_id')
-                                ->where(function($monthlyCheck) {
-                                    $monthlyCheck->where('is_monthly_phase', false)
-                                                 ->orWhereNull('is_monthly_phase');
-                                })
-                                ->where(function($dailyCheck) {
-                                    $dailyCheck->where('is_daily_phase', false)
-                                               ->orWhereNull('is_daily_phase');
-                                });
+                            ->whereNull('parent_project_id')
+                            ->where(function ($monthlyCheck) {
+                                $monthlyCheck->where('is_monthly_phase', false)
+                                    ->orWhereNull('is_monthly_phase');
                             })
-                            // ✅ المشاريع الفرعية (شهرية أو يومية) - أي مشروع له parent_project_id أو is_monthly_phase = true أو is_daily_phase = true
-                            ->orWhere(function($subProjectsQ) {
-                                $subProjectsQ->whereNotNull('parent_project_id')
-                                             ->orWhere('is_monthly_phase', true)
-                                             ->orWhere('is_daily_phase', true)
-                                             ->orWhereNotNull('month_number')
-                                             ->orWhereNotNull('phase_day');
+                            ->where(function ($dailyCheck) {
+                                $dailyCheck->where('is_daily_phase', false)
+                                    ->orWhereNull('is_daily_phase');
                             });
-                        })
-                        ->whereIn('status', [
-                            'جديد',
-                            'قيد التوريد',
-                            'تم التوريد',
-                            'مسند لباحث',
-                            'جاهز للتنفيذ',
-                            'قيد التنفيذ',
-                            'تم التنفيذ',
-                            'في المونتاج',
-                            'تم المونتاج',
-                            'وصل للمتبرع'
-                        ]);
+                    })
+                        // ✅ المشاريع الفرعية (شهرية أو يومية) - أي مشروع له parent_project_id أو is_monthly_phase = true أو is_daily_phase = true
+                        ->orWhere(function ($subProjectsQ) {
+                        $subProjectsQ->whereNotNull('parent_project_id')
+                            ->orWhere('is_monthly_phase', true)
+                            ->orWhere('is_daily_phase', true)
+                            ->orWhereNotNull('month_number')
+                            ->orWhereNotNull('phase_day');
+                    });
+                })
+                ->whereIn('status', [
+                    'جديد',
+                    'قيد التوريد',
+                    'تم التوريد',
+                    'مسند لباحث',
+                    'جاهز للتنفيذ',
+                    'قيد التنفيذ',
+                    'تم التنفيذ',
+                    'في المونتاج',
+                    'تم المونتاج',
+                    'وصل للمتبرع'
+                ]);
         }
 
         // Media Manager يرى: 
@@ -923,21 +925,21 @@ class ProjectProposal extends Model
         // - جاهز للتنفيذ (بعد إسناد المصور) - جميع المشاريع
         // - تم التنفيذ, قيد المونتاج, تم المونتاج, وصل للمتبرع - فقط المشاريع اليومية
         if ($user->role === 'media_manager') {
-            return $query->where(function($q) {
+            return $query->where(function ($q) {
                 // المشاريع في حالة "مسند لباحث" أو "جاهز للتنفيذ" - جميع المشاريع
                 $q->whereIn('status', ['مسند لباحث', 'جاهز للتنفيذ'])
-                  // أو المشاريع اليومية في حالات المونتاج
-                  ->orWhere(function($subQ) {
-                      $subQ->where('is_daily_phase', true)
-                           ->whereIn('status', ['تم التنفيذ', 'في المونتاج', 'تم المونتاج', 'وصل للمتبرع']);
-                  });
+                    // أو المشاريع اليومية في حالات المونتاج
+                    ->orWhere(function ($subQ) {
+                        $subQ->where('is_daily_phase', true)
+                            ->whereIn('status', ['تم التنفيذ', 'في المونتاج', 'تم المونتاج', 'وصل للمتبرع']);
+                    });
             });
         }
 
         // Montage Producer يرى: المشاريع المسندة له فقط
         if ($user->role === 'montage_producer') {
             return $query->where('assigned_montage_producer_id', $user->id)
-                        ->whereIn('status', ['في المونتاج', 'تم المونتاج', 'وصل للمتبرع', 'يجب إعادة المونتاج']);
+                ->whereIn('status', ['في المونتاج', 'تم المونتاج', 'وصل للمتبرع', 'يجب إعادة المونتاج']);
         }
 
         // Executed Projects Coordinator يرى: 
@@ -945,21 +947,21 @@ class ProjectProposal extends Model
         // - تم التنفيذ، منفذ، في المونتاج، تم المونتاج، معاد مونتاجه، وصل للمتبرع (لإدارة المستفيدين)
         // المشاريع اليومية والمشاريع الشهرية فقط (وليس المشروع الأصلي)
         if ($user->role === 'executed_projects_coordinator') {
-            return $query->where(function($q) {
+            return $query->where(function ($q) {
                 $q->where('is_daily_phase', true)
-                  ->orWhere('is_monthly_phase', true);
+                    ->orWhere('is_monthly_phase', true);
             })
-            ->whereIn('status', [
-                'جاهز للتنفيذ', 
-                'تم اختيار المخيم', 
-                'قيد التنفيذ',
-                'تم التنفيذ',
-                'منفذ',
-                'في المونتاج',
-                'تم المونتاج',
-                'معاد مونتاجه',
-                'وصل للمتبرع'
-            ]);
+                ->whereIn('status', [
+                    'جاهز للتنفيذ',
+                    'تم اختيار المخيم',
+                    'قيد التنفيذ',
+                    'تم التنفيذ',
+                    'منفذ',
+                    'في المونتاج',
+                    'تم المونتاج',
+                    'معاد مونتاجه',
+                    'وصل للمتبرع'
+                ]);
         }
 
         // Executor يرى المشاريع المخصصة لفريقه
@@ -969,13 +971,13 @@ class ProjectProposal extends Model
                 ->where('user_id', $user->id)
                 ->where('is_active', true)
                 ->pluck('team_id');
-            
+
             if ($teamIds->isEmpty()) {
                 return $query->where('id', null); // لا فرق = لا مشاريع
             }
-            
+
             return $query->whereIn('assigned_to_team_id', $teamIds)
-                        ->whereIn('status', ['قيد التنفيذ', 'تم التنفيذ']);
+                ->whereIn('status', ['قيد التنفيذ', 'تم التنفيذ']);
         }
 
         // إذا كان الدور غير معروف، لا نرجع أي مشاريع
@@ -996,7 +998,7 @@ class ProjectProposal extends Model
         // ✅ السماح بإسناد/تعديل الباحث في جميع الحالات
         // ممنوع فقط للمشاريع المنتهية أو الملغاة
         $nonAssignableStatuses = ['منتهي', 'ملغى'];
-        
+
         if (in_array($this->status, $nonAssignableStatuses)) {
             return false;
         }
@@ -1094,14 +1096,14 @@ class ProjectProposal extends Model
             if (!$this->estimated_duration_days) {
                 return null;
             }
-            
+
             $today = Carbon::today();
             $executionDate = Carbon::parse($this->execution_date)->startOfDay();
-            
+
             // حساب الأيام المتبقية حتى تاريخ التنفيذ
             // diffInDays مع false يعطي الفرق الموقع (موجب للمستقبل، سالب للماضي)
             $daysUntilExecution = $today->diffInDays($executionDate, false);
-            
+
             // الأيام المتبقية = الأيام حتى التنفيذ + مدة التنفيذ
             // مثال: execution_date = 30 ديسمبر، اليوم = 26 ديسمبر
             // daysUntilExecution = 4، estimated_duration_days = 1
@@ -1110,7 +1112,7 @@ class ProjectProposal extends Model
             // لذا الأيام المتبقية = daysUntilExecution فقط
             // وإذا كان execution_date في الماضي، نرجع القيمة السالبة (متأخر)
             $remainingDays = $daysUntilExecution;
-            
+
             return $remainingDays;
         }
 
@@ -1170,7 +1172,7 @@ class ProjectProposal extends Model
         }
 
         $remainingDays = $this->getRemainingDays();
-        
+
         // إذا كانت الأيام المتبقية أقل من 2، نحسب التأخير
         // الصيغة: delayed_days = 2 - remaining_days
         // remaining_days = 1 -> delayed_days = 1
@@ -1229,46 +1231,46 @@ class ProjectProposal extends Model
         if (!$this->parent_project_id) {
             return;
         }
-        
+
         $parentProject = self::find($this->parent_project_id);
         if (!$parentProject || !$parentProject->is_divided_into_phases) {
             return;
         }
-        
+
         // جلب جميع المشاريع الفرعية
         $phases = collect();
-        
+
         if ($parentProject->phase_type === 'daily') {
             $phases = $parentProject->dailyPhases()->get();
         } elseif ($parentProject->phase_type === 'monthly') {
             $phases = $parentProject->monthlyPhases()->get();
         }
-        
+
         // إذا لم يكن هناك مشاريع فرعية، لا نفعل شيء
         if ($phases->isEmpty()) {
             return;
         }
-        
+
         // التحقق من أن جميع المشاريع الفرعية في حالة "وصل للمتبرع"
-        $allSentToDonor = $phases->every(function($phase) {
+        $allSentToDonor = $phases->every(function ($phase) {
             return $phase->status === 'وصل للمتبرع';
         });
-        
+
         // التحقق من أن جميع المشاريع الفرعية في حالة "منتهى"
-        $allCompleted = $phases->every(function($phase) {
+        $allCompleted = $phases->every(function ($phase) {
             return $phase->status === 'منتهي';
         });
-        
+
         // إذا كانت جميع المشاريع الفرعية في حالة "وصل للمتبرع"
         // وتكون حالة المشروع الأصلي ليست "وصل للمتبرع"، نحدثها
         if ($allSentToDonor && $parentProject->status !== 'وصل للمتبرع') {
             $oldStatus = $parentProject->status;
-            
+
             $parentProject->update([
                 'status' => 'وصل للمتبرع',
                 'sent_to_donor_date' => $parentProject->sent_to_donor_date ?? now(),
             ]);
-            
+
             // تسجيل التغيير في Timeline
             $parentProject->recordStatusChange(
                 $oldStatus,
@@ -1276,21 +1278,21 @@ class ProjectProposal extends Model
                 $this->created_by ?? auth()->id() ?? 1,
                 "تم تحديث حالة المشروع الأصلي إلى 'وصل للمتبرع' لأن جميع المشاريع الفرعية وصلت للمتبرع"
             );
-            
+
             // مسح الكاش
             static::clearProjectsCache();
         }
-        
+
         // ✅ إذا كانت جميع المشاريع الفرعية في حالة "منتهى"
         // وتكون حالة المشروع الأصلي ليست "منتهى"، نحدثها
         if ($allCompleted && $parentProject->status !== 'منتهي') {
             $oldStatus = $parentProject->status;
-            
+
             $parentProject->update([
                 'status' => 'منتهي',
                 'completed_date' => $parentProject->completed_date ?? now(),
             ]);
-            
+
             // تسجيل التغيير في Timeline
             $parentProject->recordStatusChange(
                 $oldStatus,
@@ -1298,7 +1300,7 @@ class ProjectProposal extends Model
                 $this->created_by ?? auth()->id() ?? 1,
                 "تم تحديث حالة المشروع الأصلي إلى 'منتهي' لأن جميع المشاريع الفرعية انتهت"
             );
-            
+
             // مسح الكاش
             static::clearProjectsCache();
         }
@@ -1315,7 +1317,7 @@ class ProjectProposal extends Model
         }
 
         return Carbon::parse($this->montage_start_date)
-                    ->diffInDays(Carbon::parse($this->montage_completed_date));
+            ->diffInDays(Carbon::parse($this->montage_completed_date));
     }
 
     /**
@@ -1414,7 +1416,7 @@ class ProjectProposal extends Model
             }
             return rtrim($baseUrl, '/') . '/api/project-proposals/' . $this->id . '/image';
         }
-        
+
         return null;
     }
 
@@ -1441,18 +1443,20 @@ class ProjectProposal extends Model
         }
 
         // ✅ دعم البيانات القديمة: إذا كان notes_image يحتوي على URL كامل، استخدمه مباشرة
-        if (!$hasNoteImages && $this->notes_image &&
-            (str_starts_with($this->notes_image, 'http://') || str_starts_with($this->notes_image, 'https://'))) {
+        if (
+            !$hasNoteImages && $this->notes_image &&
+            (str_starts_with($this->notes_image, 'http://') || str_starts_with($this->notes_image, 'https://'))
+        ) {
             return $this->notes_image;
         }
 
         // ✅ الحصول على base URL للـ API
         // في Production، استخدم config('app.url') مباشرة لضمان URL صحيح
         $baseUrl = config('app.url', 'http://localhost:8000');
-        
+
         // ✅ في Development فقط، جرب request()->getSchemeAndHttpHost() أولاً
         if (config('app.env') === 'local') {
-        try {
+            try {
                 $requestUrl = request()->getSchemeAndHttpHost();
                 if ($requestUrl) {
                     // ✅ في Development، إذا كان localhost بدون port، أضف port 8000
@@ -1461,16 +1465,16 @@ class ProjectProposal extends Model
                     } elseif (!str_contains($requestUrl, 'localhost')) {
                         $baseUrl = $requestUrl;
                     }
-            }
-        } catch (\Exception $e) {
+                }
+            } catch (\Exception $e) {
                 // Fallback to config
             }
         }
-        
+
         // ✅ في Development فقط: التأكد من أن localhost يحتوي على port
         if (config('app.env') === 'local' && str_contains($baseUrl, 'localhost') && !str_contains($baseUrl, 'localhost:')) {
-                $baseUrl = str_replace('localhost', 'localhost:8000', $baseUrl);
-            }
+            $baseUrl = str_replace('localhost', 'localhost:8000', $baseUrl);
+        }
 
         // ✅ استخدام route مع ID (موصى به - يعمل في جميع الصفحات)
         // ✅ هذا الـ route يعمل بشكل موثوق في قائمة المشاريع وصفحة التفاصيل
@@ -1480,7 +1484,7 @@ class ProjectProposal extends Model
         } else {
             $cacheBuster .= time();
         }
-        
+
         // ✅ استخدام `/api/project-note-image/{id}` - يعمل بشكل أفضل من `/api/project_notes_images/{filename}`
         return rtrim($baseUrl, '/') . '/api/project-note-image/' . $this->id . $cacheBuster;
     }
@@ -1500,7 +1504,7 @@ class ProjectProposal extends Model
 
         // ✅ الحصول على base URL للـ API
         $baseUrl = config('app.url', 'http://localhost:8000');
-        
+
         // ✅ في Development فقط، جرب request()->getSchemeAndHttpHost() أولاً
         if (config('app.env') === 'local') {
             try {
@@ -1516,7 +1520,7 @@ class ProjectProposal extends Model
                 // Fallback to config
             }
         }
-        
+
         // ✅ استخدام route للتحميل
         return rtrim($baseUrl, '/') . '/api/project-note-image/' . $this->id . '/download';
     }
@@ -1549,11 +1553,11 @@ class ProjectProposal extends Model
         if ($this->beneficiaries_count > 0) {
             return $this->beneficiaries_count;
         }
-        
+
         // حساب تلقائي: عدد الطرود × عدد المستفيدين لكل طرد
         $quantity = $this->quantity ?? 0;
         $perUnit = $this->beneficiaries_per_unit ?? 0;
-        
+
         return $quantity;
     }
 
@@ -1565,7 +1569,7 @@ class ProjectProposal extends Model
         if (!$this->is_divided_into_phases || !$this->phase_duration_days || $this->phase_duration_days <= 0) {
             return null;
         }
-        
+
         // ✅ التحقق من وجود net_amount
         if (!$this->net_amount || $this->net_amount <= 0) {
             \Log::warning('Cannot calculate daily amount - net_amount is missing or invalid', [
@@ -1576,9 +1580,9 @@ class ProjectProposal extends Model
             ]);
             return null;
         }
-        
+
         $dailyAmount = round($this->net_amount / $this->phase_duration_days, 2);
-        
+
         // ✅ Log للحساب (للت debugging)
         \Log::debug('Calculated daily amount', [
             'project_id' => $this->id,
@@ -1586,7 +1590,7 @@ class ProjectProposal extends Model
             'phase_duration_days' => $this->phase_duration_days,
             'daily_amount' => $dailyAmount
         ]);
-        
+
         return $dailyAmount;
     }
 
@@ -1598,17 +1602,17 @@ class ProjectProposal extends Model
         if (!$this->is_divided_into_phases || !$this->phase_start_date || !$this->phase_duration_days) {
             return null;
         }
-        
+
         $daysSinceStart = Carbon::now()->diffInDays(Carbon::parse($this->phase_start_date));
-        
+
         if ($daysSinceStart < 0) {
             return null; // Phase hasn't started yet
         }
-        
+
         if ($daysSinceStart >= $this->phase_duration_days) {
             return null; // Phase completed
         }
-        
+
         return $daysSinceStart + 1; // 1-based day number
     }
 
@@ -1620,7 +1624,7 @@ class ProjectProposal extends Model
         if (!$this->is_divided_into_phases) {
             return false;
         }
-        
+
         $currentDay = $this->getCurrentPhaseDay();
         return $currentDay !== null;
     }
@@ -1641,7 +1645,7 @@ class ProjectProposal extends Model
         if (!$this->is_divided_into_phases || $this->phase_type !== 'monthly' || !$this->total_months || $this->total_months <= 0) {
             return null;
         }
-        
+
         // ✅ تقسيم المبلغ الأصلي بالعملة المحلية (قبل التحويل والخصم)
         return round($this->donation_amount / $this->total_months, 2);
     }
@@ -1659,7 +1663,7 @@ class ProjectProposal extends Model
             return 0;
         }
         $now = now();
-        $inserts = $rows->map(fn ($row) => [
+        $inserts = $rows->map(fn($row) => [
             'project_proposal_id' => $child->id,
             'image_path' => $row['image_path'],
             'display_order' => $row['display_order'],
@@ -1684,7 +1688,7 @@ class ProjectProposal extends Model
         $now = now();
         $total = 0;
         foreach ($children as $child) {
-            $inserts = $rows->map(fn ($row) => [
+            $inserts = $rows->map(fn($row) => [
                 'project_proposal_id' => $child->id,
                 'image_path' => $row['image_path'],
                 'display_order' => $row['display_order'],
@@ -1706,7 +1710,7 @@ class ProjectProposal extends Model
     {
         $noteImages = $this->noteImages()->orderBy('display_order')->get();
         if ($noteImages->isNotEmpty()) {
-            return $noteImages->map(fn ($img) => [
+            return $noteImages->map(fn($img) => [
                 'image_path' => $img->image_path,
                 'display_order' => $img->display_order,
             ]);
@@ -1736,14 +1740,14 @@ class ProjectProposal extends Model
 
         for ($day = 1; $day <= $this->phase_duration_days; $day++) {
             $executionDate = $startDate->copy()->addDays($day - 1);
-            
+
             // ✅ حساب المبلغ اليومي بالعملة المحلية (لـ donation_amount)
             // $dailyAmount هو بالدولار (net_amount / days)
             // نحتاج تحويله للعملة المحلية: donation_amount = dailyAmount / exchange_rate
-            $dailyAmountInLocalCurrency = $this->exchange_rate > 0 
-                ? round($dailyAmount / $this->exchange_rate, 2) 
+            $dailyAmountInLocalCurrency = $this->exchange_rate > 0
+                ? round($dailyAmount / $this->exchange_rate, 2)
                 : $dailyAmount;
-            
+
             $dailyPhase = self::create([
                 // serial_number will be auto-generated in boot method
                 'donor_code' => $this->donor_code,
@@ -1803,11 +1807,11 @@ class ProjectProposal extends Model
     public function deleteDailyPhases()
     {
         $deletedCount = $this->dailyPhases()->delete();
-        
+
         if ($deletedCount > 0) {
             $this->recordStatusChange($this->status, $this->status, $this->created_by ?? 1, "تم حذف المشاريع اليومية");
         }
-        
+
         return $deletedCount;
     }
 
@@ -1818,12 +1822,12 @@ class ProjectProposal extends Model
     {
         // Delete existing daily phases
         $this->deleteDailyPhases();
-        
+
         // Create new daily phases if still divided
         if ($this->is_divided_into_phases) {
             return $this->createDailyPhases();
         }
-        
+
         return collect([]);
     }
 
@@ -1850,13 +1854,13 @@ class ProjectProposal extends Model
             return null;
         }
         $monthlyPhases = collect();
-        
+
         // ✅ إنشاء جميع الشهور دفعة واحدة
         for ($monthNumber = 1; $monthNumber <= $this->total_months; $monthNumber++) {
             // حساب تاريخ بداية الشهر (من تاريخ بداية المشروع الأصلي)
             // ✅ استخدام addMonths بدلاً من addDays لضمان الانتقال للشهر التالي في التقويم
             $monthStartDate = $startDate->copy()->addMonths($monthNumber - 1)->startOfMonth();
-            
+
             $monthlyPhase = self::create([
                 'donor_code' => $this->donor_code,
                 'project_name' => $this->project_name . ' - الشهر ' . $monthNumber,
@@ -1898,7 +1902,7 @@ class ProjectProposal extends Model
 
             // ✅ توريث صور الملاحظات (من project_proposal_images) للمشروع الفرعي
             $this->copyNoteImagesToChild($monthlyPhase);
-            
+
             $monthlyPhases->push($monthlyPhase);
         }
 
@@ -2006,11 +2010,11 @@ class ProjectProposal extends Model
     public function deleteMonthlyPhases()
     {
         $deletedCount = $this->monthlyPhases()->delete();
-        
+
         if ($deletedCount > 0) {
             $this->recordStatusChange($this->status, $this->status, $this->created_by ?? 1, "تم حذف المشاريع الشهرية");
         }
-        
+
         return $deletedCount;
     }
 
@@ -2030,7 +2034,7 @@ class ProjectProposal extends Model
         if ($this->phase_type === 'daily' && in_array('phase_duration_days', $updatedFields)) {
             // حذف المشاريع اليومية القديمة
             $this->deleteDailyPhases();
-            
+
             // إنشاء مشاريع يومية جديدة بالعدد الجديد (سيتم حساب المبالغ تلقائياً)
             if ($this->is_divided_into_phases && $this->phase_duration_days && $this->phase_start_date) {
                 $this->createDailyPhases();
@@ -2050,7 +2054,7 @@ class ProjectProposal extends Model
         if ($this->phase_type === 'daily' && in_array('phase_start_date', $updatedFields)) {
             // حذف المشاريع اليومية القديمة
             $this->deleteDailyPhases();
-            
+
             // إنشاء مشاريع يومية جديدة بالتواريخ الجديدة
             if ($this->is_divided_into_phases && $this->phase_duration_days && $this->phase_start_date) {
                 $this->createDailyPhases();
@@ -2084,7 +2088,7 @@ class ProjectProposal extends Model
         // إذا تم تمرير updatedFields، نحدّث فقط الحقول التي تم تحديثها
         $fieldsToSync = [];
         $monthlyFieldsToSync = [];
-        
+
         if (!empty($updatedFields)) {
             // تصفية الحقول التي يجب مزامنتها
             $fieldsToSync = array_intersect($allSyncableFields, $updatedFields);
@@ -2124,16 +2128,16 @@ class ProjectProposal extends Model
             $dailyPhases = $this->dailyPhases()->get();
             foreach ($dailyPhases as $dailyPhase) {
                 $phaseUpdateData = $dailyUpdateData;
-                
+
                 // استخراج رقم اليوم من الاسم الحالي أو استخدام phase_day
                 if (preg_match('/\s-\sاليوم\s(\d+)$/', $dailyPhase->project_name, $matches)) {
                     $dayNumber = $matches[1];
                 } else {
                     $dayNumber = $dailyPhase->phase_day ?? 1;
                 }
-                
+
                 $phaseUpdateData['project_name'] = $this->project_name . ' - اليوم ' . $dayNumber;
-                
+
                 // تحديث المشروع اليومي
                 $dailyPhase->update($phaseUpdateData);
                 $hasUpdates = true;
@@ -2143,16 +2147,16 @@ class ProjectProposal extends Model
             $monthlyPhases = $this->monthlyPhases()->get();
             foreach ($monthlyPhases as $monthlyPhase) {
                 $phaseUpdateData = $monthlyUpdateData;
-                
+
                 // استخراج رقم الشهر من الاسم الحالي أو استخدام month_number
                 if (preg_match('/\s-\sالشهر\s(\d+)$/', $monthlyPhase->project_name, $matches)) {
                     $monthNumber = $matches[1];
                 } else {
                     $monthNumber = $monthlyPhase->month_number ?? 1;
                 }
-                
+
                 $phaseUpdateData['project_name'] = $this->project_name . ' - الشهر ' . $monthNumber;
-                
+
                 // تحديث المشروع الشهري
                 $monthlyPhase->update($phaseUpdateData);
                 $hasUpdates = true;
@@ -2227,7 +2231,7 @@ class ProjectProposal extends Model
         if ($this->isParentProject()) {
             return 0;
         }
-        
+
         $supplyCost = $this->calculateSupplyCost();
         $availableAmount = $this->getAvailableAmountForSupply();
         return round($availableAmount - $supplyCost, 2);
@@ -2243,7 +2247,7 @@ class ProjectProposal extends Model
         if ($this->isParentProject()) {
             return false;
         }
-        
+
         return $this->calculateSurplus() < 0;
     }
 
@@ -2266,12 +2270,12 @@ class ProjectProposal extends Model
             ]);
             return;
         }
-        
+
         $unitCost = $this->calculateUnitCost();
         $supplyCost = $this->calculateSupplyCost();
         $availableAmount = $this->getAvailableAmountForSupply();
         $surplus = round($availableAmount - $supplyCost, 2);
-        
+
         $this->update([
             'unit_cost' => $unitCost,
             'supply_cost' => $supplyCost,
@@ -2305,25 +2309,25 @@ class ProjectProposal extends Model
         // ✅ استخدام net_amount (المبلغ الصافي بعد تحويله للدولار وخصم النسبة الإدارية)
         // net_amount = amount_in_usd - (amount_in_usd * admin_discount_percentage / 100)
         $baseAmount = $this->net_amount;
-        
+
         // ✅ إذا لم يكن net_amount موجوداً، نحسبه من amount_in_usd مع خصم النسبة الإدارية
         if (!$baseAmount || $baseAmount <= 0) {
             // حساب المبلغ بالدولار (قبل الخصم)
             $amountInUsd = $this->amount_in_usd ?? round($this->donation_amount * ($this->exchange_rate ?? 1), 2);
-            
+
             // خصم النسبة الإدارية من المبلغ بالدولار
             $adminDiscountPercentage = $this->admin_discount_percentage ?? 0;
             $adminDiscountAmount = round($amountInUsd * ($adminDiscountPercentage / 100), 2);
             $baseAmount = round($amountInUsd - $adminDiscountAmount, 2);
         }
-        
+
         // ✅ خصم نسبة خصم النقل من net_amount (هي نفسها نسبة الخصم للتحويل)
         $transferDiscountAmount = round($baseAmount * ($transferDiscountPercentage / 100), 2);
         $netAmountAfterTransferDiscount = round($baseAmount - $transferDiscountAmount, 2);
-        
+
         // ✅ تحويل المبلغ بعد خصم نسبة النقل للشيكل باستخدام سعر الصرف
         $netAmountShekel = round($netAmountAfterTransferDiscount * $exchangeRate, 2);
-        
+
         // ✅ Log للحسابات (للتشخيص)
         \Log::info('Convert to Shekel Calculation', [
             'project_id' => $this->id,
@@ -2335,14 +2339,14 @@ class ProjectProposal extends Model
             'shekel_exchange_rate' => $exchangeRate, // سعر الصرف (1 دولار = ? شيكل)
             'net_amount_shekel' => $netAmountShekel, // المبلغ النهائي بالشيكل
         ]);
-        
+
         $this->update([
             'shekel_exchange_rate' => $exchangeRate,
             'net_amount_shekel' => $netAmountShekel,
             'shekel_converted_at' => now(),
             'shekel_converted_by' => $userId,
         ]);
-        
+
         return $netAmountShekel;
     }
 
@@ -2390,8 +2394,10 @@ class ProjectProposal extends Model
         }
 
         // If it's already a full URL, return it
-        if (str_starts_with($this->beneficiaries_excel_file, 'http://') || 
-            str_starts_with($this->beneficiaries_excel_file, 'https://')) {
+        if (
+            str_starts_with($this->beneficiaries_excel_file, 'http://') ||
+            str_starts_with($this->beneficiaries_excel_file, 'https://')
+        ) {
             return $this->beneficiaries_excel_file;
         }
 
@@ -2426,9 +2432,9 @@ class ProjectProposal extends Model
      */
     public function getRejectionReasonDisplayAttribute()
     {
-        return $this->rejection_reason 
-            ?? $this->admin_rejection_reason 
-            ?? $this->media_rejection_reason 
+        return $this->rejection_reason
+            ?? $this->admin_rejection_reason
+            ?? $this->media_rejection_reason
             ?? null;
     }
 
@@ -2471,10 +2477,12 @@ class ProjectProposal extends Model
 
         // التحقق من subcategory name_ar = 'كفالة أيتام' أو name = 'Orphan Sponsorship'
         $subcategory = $this->subcategory;
-        if ($subcategory && (
-            strtolower(trim($subcategory->name_ar ?? '')) === 'كفالة أيتام' ||
-            strtolower(trim($subcategory->name ?? '')) === 'orphan sponsorship'
-        )) {
+        if (
+            $subcategory && (
+                strtolower(trim($subcategory->name_ar ?? '')) === 'كفالة أيتام' ||
+                strtolower(trim($subcategory->name ?? '')) === 'orphan sponsorship'
+            )
+        ) {
             return true;
         }
 

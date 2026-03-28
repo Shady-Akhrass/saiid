@@ -943,13 +943,13 @@ const ProjectsList = () => {
       }
 
       const projectTypeStr = (projectType || '').trim();
-      
+
       // ✅ تحقق مرن من مسميات الكفالة
-      const isSponsorshipType = projectTypeStr === 'الكفالات' || 
-                                projectTypeStr === 'كفالات' ||
-                                projectTypeStr === 'الكفالة' ||
-                                projectTypeStr.includes('الكفالات') || 
-                                projectTypeStr.includes('كفالة أيتام');
+      const isSponsorshipType = projectTypeStr === 'الكفالات' ||
+        projectTypeStr === 'كفالات' ||
+        projectTypeStr === 'الكفالة' ||
+        projectTypeStr.includes('الكفالات') ||
+        projectTypeStr.includes('كفالة أيتام');
 
       if (isSponsorshipType) return true;
 
@@ -1549,7 +1549,7 @@ const ProjectsList = () => {
         },
         signal: abortController.signal // ✅ إضافة signal لإلغاء الطلب
       });
-
+      // ************************************************************************************************************************
       // 🔍 Debug: عرض الاستجابة الكاملة
       if (isProjectManager) {
         const projectsData = response.data?.projects || response.data?.data?.data || response.data?.data || [];
@@ -4632,7 +4632,7 @@ const ProjectsList = () => {
       }
       return;
     }
-
+    // this is section 4 ******************************************************************
     // ✅ فتح Modal للقبول/الرفض عند النقر على حالة "وصل للمتبرع"
     if (project.status !== 'وصل للمتبرع') return;
 
@@ -5367,7 +5367,7 @@ const ProjectsList = () => {
 
     // ✅ لصفحة المشاريع المنتهية: نثق في فلترة السيرفر ونعرض المشاريع المجلوبة كما هي (Paginated)
     // السيرفر يقوم بفلترة الحالة (منتهي) والدور والصلاحيات والبحث والترتيب
-    if (isFinishedProjectsPage ) {
+    if (isFinishedProjectsPage) {
       return projects;
     }
 
@@ -5457,7 +5457,7 @@ const ProjectsList = () => {
           projectDate = parseLocalDate(executionDate) || new Date(executionDate);
         }
         if (!projectDate) return true;
-        
+
         // ✅ في صفحة المنتهية، لا نفلتر حسب الشهر التقويمي الحالي
         if (isFinishedProjectsPage) return true;
 
@@ -5867,7 +5867,7 @@ const ProjectsList = () => {
         // استخراج phase_start_date من الأب
         const parent = project.parent_project ?? project.parentProject ?? null;
         const phaseStart = parent?.phase_start_date ?? parent?.phaseStartDate ?? null;
-        
+
         // ✅ في صفحة المنتهية، لا نفلتر حسب الشهر الحالي
         if (isFinishedProjectsPage) return true;
 
@@ -6224,7 +6224,7 @@ const ProjectsList = () => {
           }
         }
       }
-
+      // this is section five **********************************************************************
       // ✅ تطبيق فلترة الحالة في Frontend - دعم الاختيار المتعدد
       if (Array.isArray(filters.status) && filters.status.length > 0) {
         filteredProjects = filteredProjects.filter((project) => filters.status.includes(project.status));
@@ -7643,7 +7643,7 @@ const ProjectsList = () => {
             )}
           </div>
         )}
-
+        {/* this is section 6 */}
         {/* ✅ قسم المشاريع قيد التنفيذ - للمنسق المنفذ */}
         {isExecutedCoordinator && inExecutionProjects.length > 0 && (
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 rounded-2xl p-6 shadow-xl border-2 border-blue-200 space-y-4">
@@ -9142,7 +9142,7 @@ const ProjectsList = () => {
           </div>
         </div>
       )}
-
+      {/* thsi is the the last section section 7  */}
       {/* Modal تأجيل المشروع (القديم - للاستخدام من أماكن أخرى) */}
       {showPostponeModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
