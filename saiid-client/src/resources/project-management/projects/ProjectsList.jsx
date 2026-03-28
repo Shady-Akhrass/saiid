@@ -918,6 +918,7 @@ const ProjectsList = () => {
   }, []);
 
   // ✅ للحراسة لمنسق الكفالة: عرض كل مشاريع "نوع الكفالات" (كفالة أيتام + كفالة الأسر + أي تفريعة) — بدون تقييد بالتفريعة
+  // ✅ للحراسة لمنسق الكفالة: عرض كل مشاريع "نوع الكفالات" (كفالة أيتام + كفالة الأسر + أي تفريعة) — بدون تقييد بالتفريعة
   const isSponsorshipProject = useCallback((project) => {
     if (!project) return false;
     try {
@@ -931,7 +932,9 @@ const ProjectsList = () => {
       } else if (project.project_type != null) {
         projectType = String(project.project_type);
       }
-      if ((!projectType || projectType.trim() === '') && isSubProject && parentProject) {
+
+      // ✅ محاولة استخراج النوع من الأب إذا كان مشروعاً فرعياً ونوعه غير محدد
+      if ((!projectType || projectType.trim() === '' || projectType === 'undefined') && isSubProject && parentProject) {
         if (typeof parentProject.project_type === 'object' && parentProject.project_type !== null) {
           projectType = parentProject.project_type.name_ar || parentProject.project_type.name || parentProject.project_type.name_en || '';
         } else if (parentProject.project_type != null) {
@@ -940,8 +943,13 @@ const ProjectsList = () => {
       }
 
       const projectTypeStr = (projectType || '').trim();
-      const isSponsorshipType = projectTypeStr === 'الكفالات' || projectTypeStr === 'كفالات' ||
-        projectTypeStr.toLowerCase().includes('كفالات') || projectTypeStr.includes('كفالة');
+      
+      // ✅ تحقق مرن من مسميات الكفالة
+      const isSponsorshipType = projectTypeStr === 'الكفالات' || 
+                                projectTypeStr === 'كفالات' ||
+                                projectTypeStr === 'الكفالة' ||
+                                projectTypeStr.includes('الكفالات') || 
+                                projectTypeStr.includes('كفالة أيتام');
 
       if (isSponsorshipType) return true;
 
@@ -954,15 +962,22 @@ const ProjectsList = () => {
           parentType = String(parentProject.project_type);
         }
         const parentStr = (parentType || '').trim();
-        if (parentStr === 'الكفالات' || parentStr === 'كفالات' || parentStr.includes('كفالات') || parentStr.includes('كفالة')) {
+        if (parentStr === 'الكفالات' || parentStr === 'كفالات' || parentStr.includes('كفالة')) {
           return true;
         }
       }
+
+      // ✅ حالة خاصة: إذا كان منسق كفالات والـ backend أرجع المشروع، نعتبره كفالة افتراضياً إذا كان النوع غير محدد
+      if (normalizedRole === 'orphan_sponsor_coordinator' && (!projectType || projectType === 'undefined')) {
+        return true;
+      }
+
       return false;
-    } catch {
+    } catch (e) {
+      console.error('Error in isSponsorshipProject:', e);
       return false;
     }
-  }, []);
+  }, [normalizedRole]);
 
   // ✅ مدة الكاش: 1 دقيقة لـ Project Manager، دقيقتان للباقي
   const getCacheMaxAge = () => {
@@ -5812,12 +5827,28 @@ const ProjectsList = () => {
             internalCode.includes(searchLower);
         });
       }
+
+      // ✅ لمدير المشاريع: إخفاء مشاريع الكفالة تماماً من القائمة العامة
+      if (isProjectManager) {
+        const countBeforePMFilter = filteredProjects.length;
+        filteredProjects = filteredProjects.filter(project => !isSponsorshipProject(project));
+        if (import.meta.env.DEV && countBeforePMFilter !== filteredProjects.length) {
+          console.debug(`[ProjectManager] Filtered out ${countBeforePMFilter - filteredProjects.length} sponsorship projects`);
+        }
+      }
     } else if (isOrphanSponsorCoordinator) {
       // ✅ لمنسق الكفالة: الـ Backend مصدر الحقيقة للشهور/المراحل. فلترة حراسة: عرض كل مشاريع نوع "الكفالات" (كفالة أيتام + كفالة الأسر + أي تفريعة)، ثم فلترة واجهة: الحالة + البحث.
       filteredProjects = Array.isArray(projects) ? [...projects] : [];
       const countFromApi = filteredProjects.length;
 
       // ✅ حراسة: عرض فقط مشاريع الكفالات (نوع = الكفالات، يشمل كفالة أيتام وكفالة الأسر وإلخ)
+      // 🔍 DEBUG: تشخيص project_type قبل الفلترة
+      if (import.meta.env.DEV && filteredProjects.length > 0) {
+        const sample = filteredProjects.slice(0, 3);
+        sample.forEach((p, i) => {
+          console.debug(`[DEBUG] project[${i}] id=${p?.id} project_type=`, p?.project_type, 'type:', typeof p?.project_type, 'JSON:', JSON.stringify(p?.project_type));
+        });
+      }
       filteredProjects = filteredProjects.filter(isSponsorshipProject);
       const countAfterGuard = filteredProjects.length;
 

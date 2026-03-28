@@ -124,11 +124,8 @@ class ProjectProposalIndexService
     {
         $selectFields = $this->getSelectFields();
 
-        if ($userRole === self::ROLE_ORPHAN_SPONSOR_COORDINATOR) {
-            $query = ProjectProposal::query();
-        } else {
-            $query = ProjectProposal::select($selectFields);
-        }
+        // ✅ تم إجبار اختيار الحقول لضمان توفر project_type وكافة الخصائص في الموديل
+        $query = ProjectProposal::query()->select($selectFields);
 
         // ✅ FIX: Apply finished/unfinished filter CENTRALLY
         if ($finishedOnly) {
@@ -273,7 +270,12 @@ class ProjectProposalIndexService
         if ($request->filled('status') && $request->status !== 'all') {
             $query->whereIn('status', (array) $request->status);
         }
-        // ✅ FIX: Removed the elseif — buildQuery() already handles exclusion
+
+        // ✅ إخفاء مشاريع الكفالة عن مدير المشاريع في صفحة المشاريع العامة
+        $query->where(function ($q) {
+            $q->where('project_type', '!=', 'الكفالات')
+              ->orWhereNull('project_type');
+        });
     }
 
     private function applyMediaManagerFilters(Builder $query, Request $request, bool $finishedOnly = false): void
@@ -334,24 +336,34 @@ class ProjectProposalIndexService
         $query->where('project_type', 'الكفالات');
 
         if (!$finishedOnly) {
-            // ✅ تطبيق نفس منطق الأدمن لضمان ظهور المشاريع الأصلية والمراحل النشطة
+            // ✅ لمنسق الكفالة: إخفاء المشاريع الأب إذا كانت مقسمة (is_divided_into_phases = true)
+            // ✅ عرض فقط المشاريع غير المقسمة (التي ليس لها أبناء) أو المشاريع الفرعية نفسها
             $query->where(function ($q) {
-                $q->whereNull('parent_project_id')
-                    ->orWhereIn('status', [
-                        self::STATUS_SUPPLY,
-                        self::STATUS_SUPPLIED,
-                        self::STATUS_DISTRIBUTION,
-                        self::STATUS_ASSIGNED_TO_RESEARCHER,
-                        self::STATUS_READY,
-                        self::STATUS_EXECUTING,
-                        self::STATUS_EXECUTED,
-                        self::STATUS_MONTAGE,
-                        self::STATUS_MONTAGE_COMPLETED,
-                        self::STATUS_MONTAGE_REDO,
-                        self::STATUS_DELIVERED,
-                        self::STATUS_COMPLETED
-                    ]);
+                $q->where(function ($sub) {
+                    $sub->whereNull('parent_project_id')
+                        ->where(function ($divided) {
+                            $divided->where('is_divided_into_phases', false)
+                                    ->orWhereNull('is_divided_into_phases');
+                        });
+                })
+                ->orWhereNotNull('parent_project_id');
             });
+
+            // ✅ تطبيق فلترة الحالة لضمان ظهور المشاريع النشطة فقط (سواء كانت أب أو ابن)
+            $query->whereIn('status', [
+                self::STATUS_SUPPLY,
+                self::STATUS_SUPPLIED,
+                self::STATUS_DISTRIBUTION,
+                self::STATUS_ASSIGNED_TO_RESEARCHER,
+                self::STATUS_READY,
+                self::STATUS_EXECUTING,
+                self::STATUS_EXECUTED,
+                self::STATUS_MONTAGE,
+                self::STATUS_MONTAGE_COMPLETED,
+                self::STATUS_MONTAGE_REDO,
+                self::STATUS_DELIVERED,
+                self::STATUS_COMPLETED
+            ]);
 
             if ($request->filled('status') && $request->status !== 'all') {
                 $query->whereIn('status', (array) $request->status);
@@ -523,6 +535,7 @@ class ProjectProposalIndexService
             'rejection_reason',
             'media_rejection_reason',
             'admin_rejection_reason',
+            'project_type',
             'created_at',
             'updated_at'
         ])
@@ -533,7 +546,7 @@ class ProjectProposalIndexService
                 'assignedToTeam:id,team_name',
                 'subcategory:id,name_ar,name',
                 'currency:id,currency_code,currency_name_ar',
-                'parentProject:id,serial_number,project_name,donation_amount,net_amount,amount_in_usd,currency_id',
+                'parentProject:id,serial_number,project_name,project_type,donation_amount,net_amount,amount_in_usd,currency_id',
                 'parentProject.currency:id,currency_code,currency_name_ar'
             ]);
 

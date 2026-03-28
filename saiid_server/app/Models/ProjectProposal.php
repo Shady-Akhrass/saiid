@@ -1077,10 +1077,10 @@ class ProjectProposal extends Model
      */
     public function getRemainingDays()
     {
-        // ✅ العداد يتوقف عند "وصل للمتبرع" أو "منتهي"
-        $counterStoppedStatuses = ['وصل للمتبرع', 'منتهي'];
+        // ✅ العداد يتوقف فقط عند "وصل للمتبرع" أو "منتهي" أو "تم التنفيذ" (لأن العمل انتهى)
+        $counterStoppedStatuses = ['وصل للمتبرع', 'منتهي', 'تم التنفيذ', 'منفذ'];
         if (in_array($this->status, $counterStoppedStatuses)) {
-            return null; // المشروع وصل للمتبرع أو منتهي، العداد متوقف
+            return null; // المشروع منتهي فعلياً، العداد متوقف
         }
 
         // الحالات الملغاة - لا توجد أيام متبقية
