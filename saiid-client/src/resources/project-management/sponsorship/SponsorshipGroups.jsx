@@ -6,13 +6,13 @@ import { toast } from 'react-toastify';
 import {
   Plus, Edit, Trash2, FolderOpen, ChevronRight, Search,
   Users, DollarSign, Hash, Rocket, X, Save, Loader2,
-  RotateCcw, BarChart3, TrendingUp, Clock, ChevronDown
+  RotateCcw, BarChart3, TrendingUp, Clock, ChevronDown, Info
 } from 'lucide-react';
 
 const SponsorshipGroups = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+
   // ✅ Role Check: Only Admin can access this page
   const userRole = user?.role?.toLowerCase?.() ||
     user?.userRole?.toLowerCase?.() ||
@@ -201,12 +201,30 @@ const SponsorshipGroups = () => {
   };
 
   const calculateTotalUSD = () => {
-    const selectedItems = (groupItems[projectModalGroupId] || []).filter(item => 
+    const selectedItems = (groupItems[projectModalGroupId] || []).filter(item =>
       projectFormData.sponsorship_item_ids.includes(String(item.id))
     );
-    
+
     return selectedItems.reduce((total, item) => {
-      return total + parseFloat(item.amount_in_usd || 0);
+      // Use the item's cost * currency exchange rate
+      const cost = parseFloat(item.cost || 0);
+      const rate = parseFloat(item.currency?.exchange_rate_to_usd || 1);
+      return total + (cost * rate);
+    }, 0);
+  };
+
+  const calculateTotalNetUSD = () => {
+    const selectedItems = (groupItems[projectModalGroupId] || []).filter(item =>
+      projectFormData.sponsorship_item_ids.includes(String(item.id))
+    );
+
+    return selectedItems.reduce((total, item) => {
+      const cost = parseFloat(item.cost || 0);
+      const rate = parseFloat(item.currency?.exchange_rate_to_usd || 1);
+      const amountInUsd = cost * rate;
+      const discountPct = parseFloat(item.discount_percentage || 0);
+      const netAmount = amountInUsd - (amountInUsd * (discountPct / 100));
+      return total + netAmount;
     }, 0);
   };
 
@@ -215,7 +233,7 @@ const SponsorshipGroups = () => {
     const group = groups.find(g => g.id === groupId);
     const groupName = group ? group.name : '';
     setProjectFormData({ project_name: groupName, estimated_duration_days: '', project_type_id: '', subcategory_id: '', sponsorship_item_ids: [] });
-    
+
     if (groupItems[groupId] === undefined) {
       fetchItemsQuietly(groupId);
     }
@@ -227,7 +245,7 @@ const SponsorshipGroups = () => {
       if (sponsorshipType) {
         setProjectFormData(prev => ({ ...prev, project_type_id: String(sponsorshipType.id) }));
       }
-    } catch(err) {
+    } catch (err) {
       // ignore
     }
 
@@ -565,213 +583,367 @@ const SponsorshipGroups = () => {
 
       {/* Create As Project Modal */}
       {showProjectModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowProjectModal(false)}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <Rocket className="text-green-600" size={22} />
-                إنشاء كمشاريع
-              </h2>
-              <button onClick={() => setShowProjectModal(false)} className="p-2 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={() => setShowProjectModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header - Fixed */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-l from-green-50 to-white flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                  <Rocket className="text-green-600" size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800">إنشاء كمشاريع</h2>
+                  <p className="text-xs text-gray-400">إنشاء مشاريع من كفالات هذه المجموعة</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowProjectModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+              >
+                <X size={18} />
+              </button>
             </div>
-            <p className="text-sm text-gray-500 mb-4">يرجى تعبئة البيانات المطلوبة لإنشاء مشاريع من كفالات هذه المجموعة</p>
-            <form onSubmit={handleCreateAsProject} className="space-y-4">
 
-              {/* Project Name (optional - applies to all created projects) */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">اسم المشروع (اختياري)</label>
-                <input
-                  type="text"
-                  value={projectFormData.project_name}
-                  onChange={(e) => setProjectFormData({ ...projectFormData, project_name: e.target.value })}
-                  placeholder="يطبق على جميع الكفالات المختارة (اترك فارغاً لاستخدام اسم الكفالة)"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
+            {/* Body - Scrollable */}
+            <div className="overflow-y-auto flex-1 px-6 py-5">
+              <form
+                onSubmit={handleCreateAsProject}
+                className="space-y-5"
+                id="project-form"
+              >
+                {/* Project Name */}
+                <div className="bg-gray-50/80 p-4 rounded-xl border border-gray-100">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                    اسم المشروع
+                    <span className="text-gray-400 font-normal text-xs mr-1">(اختياري)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={projectFormData.project_name}
+                    onChange={(e) =>
+                      setProjectFormData({
+                        ...projectFormData,
+                        project_name: e.target.value,
+                      })
+                    }
+                    placeholder="اترك فارغاً لاستخدام اسم الكفالة الأصلي"
+                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-sm"
+                  />
+                </div>
 
-              {/* Estimated Duration */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                  <Clock size={14} /> المدة التقديرية (بالأيام)
-                </label>
-                <input
-                  type="number" min="1"
-                  value={projectFormData.estimated_duration_days}
-                  onChange={(e) => setProjectFormData({ ...projectFormData, estimated_duration_days: e.target.value })}
-                  placeholder="مثال: 30"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
+                {/* Three columns row */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Estimated Duration */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1">
+                      <Clock size={13} className="text-gray-400" />
+                      المدة (بالأيام)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={projectFormData.estimated_duration_days}
+                      onChange={(e) =>
+                        setProjectFormData({
+                          ...projectFormData,
+                          estimated_duration_days: e.target.value,
+                        })
+                      }
+                      placeholder="30"
+                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                    />
+                  </div>
 
-              {/* Project Type */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">نوع المشروع</label>
-                <select
-                  value={projectFormData.project_type_id}
-                  onChange={(e) => setProjectFormData({ ...projectFormData, project_type_id: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-                >
-                  <option value="">تلقائي (الكفالات)</option>
-                  {projectTypes.map(pt => (
-                    <option key={pt.id} value={pt.id}>{pt.name}</option>
-                  ))}
-                </select>
-              </div>
+                  {/* Project Type */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      نوع المشروع
+                    </label>
+                    <select
+                      value={projectFormData.project_type_id}
+                      onChange={(e) =>
+                        setProjectFormData({
+                          ...projectFormData,
+                          project_type_id: e.target.value,
+                        })
+                      }
+                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-sm"
+                    >
+                      <option value="">تلقائي (الكفالات)</option>
+                      {projectTypes.map((pt) => (
+                        <option key={pt.id} value={pt.id}>
+                          {pt.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Subcategory - always visible */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  التفريعة
-                </label>
-                <select
-                  value={projectFormData.subcategory_id}
-                  onChange={(e) => setProjectFormData({ ...projectFormData, subcategory_id: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-                >
-                  <option value="">اختر التفريعة (اختياري)</option>
-                  {projectSubcategories.map(cat => (
-                    <option key={cat.id} value={String(cat.id)}>{cat.name_ar || cat.name}</option>
-                  ))}
-                </select>
-                {projectSubcategories.length === 0 && projectFormData.project_type_id && (
-                  <p className="text-xs text-amber-500 mt-1">جاري تحميل التفريعات...</p>
-                )}
-              </div>
-
-              {/* Sponsorship Items - Multi Checkbox */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium text-gray-700">اختيار الكفالات</label>
-                  <div className="flex gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setProjectFormData(prev => ({ ...prev, sponsorship_item_ids: (groupItems[projectModalGroupId] || []).map(i => String(i.id)) }))}
-                      className="text-blue-600 hover:underline"
-                    >تحديد الكل</button>
-                    <span className="text-gray-300">|</span>
-                    <button
-                      type="button"
-                      onClick={() => setProjectFormData(prev => ({ ...prev, sponsorship_item_ids: [] }))}
-                      className="text-red-500 hover:underline"
-                    >إلغاء التحديد</button>
+                  {/* Subcategory */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      التفريعة
+                    </label>
+                    <select
+                      value={projectFormData.subcategory_id}
+                      onChange={(e) =>
+                        setProjectFormData({
+                          ...projectFormData,
+                          subcategory_id: e.target.value,
+                        })
+                      }
+                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-sm"
+                    >
+                      <option value="">اختياري</option>
+                      {projectSubcategories.map((cat) => (
+                        <option key={cat.id} value={String(cat.id)}>
+                          {cat.name_ar || cat.name}
+                        </option>
+                      ))}
+                    </select>
+                    {projectSubcategories.length === 0 &&
+                      projectFormData.project_type_id && (
+                        <p className="text-[10px] text-amber-500 mt-1">
+                          جاري تحميل التفريعات...
+                        </p>
+                      )}
                   </div>
                 </div>
-                <div className="border border-gray-200 rounded-xl max-h-40 overflow-y-auto divide-y divide-gray-100">
-                  {(groupItems[projectModalGroupId] || []).length === 0 ? (
-                    <p className="text-center text-gray-400 text-sm py-4">جاري تحميل الكفالات...</p>
-                  ) : (
-                    (groupItems[projectModalGroupId] || []).map(item => {
-                      const checked = projectFormData.sponsorship_item_ids.includes(String(item.id));
-                      return (
-                        <label
-                          key={item.id}
-                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${
-                            checked ? 'bg-green-50' : 'hover:bg-gray-50'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              const id = String(item.id);
-                              setProjectFormData(prev => ({
-                                ...prev,
-                                sponsorship_item_ids: e.target.checked
-                                  ? [...prev.sponsorship_item_ids, id]
-                                  : prev.sponsorship_item_ids.filter(x => x !== id),
-                              }));
-                            }}
-                            className="w-4 h-4 rounded text-green-600 border-gray-300 focus:ring-green-500"
-                          />
-                          <span className="text-sm text-gray-800 flex-1">{item.name}</span>
-                          {item.donor_code && (
-                            <span className="text-xs font-mono text-gray-400">{item.donor_code}</span>
-                          )}
-                        </label>
+
+                {/* Sponsorship Items Selection */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-semibold text-gray-700">
+                      اختيار الكفالات
+                    </label>
+                    <div className="flex gap-2 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setProjectFormData((prev) => ({
+                            ...prev,
+                            sponsorship_item_ids: (
+                              groupItems[projectModalGroupId] || []
+                            ).map((i) => String(i.id)),
+                          }))
+                        }
+                        className="text-blue-600 hover:text-blue-700 font-medium px-2 py-0.5 rounded-md hover:bg-blue-50 transition-colors"
+                      >
+                        تحديد الكل
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setProjectFormData((prev) => ({
+                            ...prev,
+                            sponsorship_item_ids: [],
+                          }))
+                        }
+                        className="text-red-500 hover:text-red-600 font-medium px-2 py-0.5 rounded-md hover:bg-red-50 transition-colors"
+                      >
+                        إلغاء الكل
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border border-gray-200 rounded-xl max-h-44 overflow-y-auto bg-white">
+                    {(groupItems[projectModalGroupId] || []).length === 0 ? (
+                      <div className="flex items-center justify-center gap-2 py-6 text-gray-400">
+                        <Loader2 className="animate-spin" size={16} />
+                        <p className="text-sm">جاري تحميل الكفالات...</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-gray-50">
+                        {(groupItems[projectModalGroupId] || []).map((item) => {
+                          const checked =
+                            projectFormData.sponsorship_item_ids.includes(
+                              String(item.id)
+                            );
+                          return (
+                            <label
+                              key={item.id}
+                              className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-all ${checked
+                                ? "bg-green-50/70 border-r-2 border-r-green-500"
+                                : "hover:bg-gray-50 border-r-2 border-r-transparent"
+                                }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const id = String(item.id);
+                                  setProjectFormData((prev) => ({
+                                    ...prev,
+                                    sponsorship_item_ids: e.target.checked
+                                      ? [...prev.sponsorship_item_ids, id]
+                                      : prev.sponsorship_item_ids.filter(
+                                        (x) => x !== id
+                                      ),
+                                  }));
+                                }}
+                                className="w-4 h-4 rounded text-green-600 border-gray-300 focus:ring-green-500 cursor-pointer"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium text-gray-800 truncate">
+                                    {item.name}
+                                  </p>
+                                  {item.discount_percentage > 0 && (
+                                    <span className="text-[10px] bg-sky-50 text-sky-600 px-1.5 py-0.5 rounded-md font-bold">
+                                      -{parseFloat(item.discount_percentage)}%
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <p className="text-[11px] text-gray-500">
+                                    {item.currency?.symbol}{parseFloat(item.cost).toLocaleString()} {item.currency?.currency_code}
+                                  </p>
+                                  <span className="text-gray-300">·</span>
+                                  <p className="text-[10px] text-gray-400">
+                                    ≈ ${parseFloat(item.amount_in_usd).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} USD
+                                    {item.discount_percentage > 0 && (
+                                      <span className="text-green-600 font-bold ml-1">
+                                        → ${(parseFloat(item.amount_in_usd) * (1 - parseFloat(item.discount_percentage) / 100)).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} Net
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+                              {item.donor_code && (
+                                <span className="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                                  {item.donor_code}
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+                    {projectFormData.sponsorship_item_ids.length === 0
+                      ? "* لم يتم التحديد — سيتم إنشاء مشروع لكل الكفالات تلقائياً"
+                      : `✓ تم اختيار ${projectFormData.sponsorship_item_ids.length} كفالة`}
+                  </p>
+                </div>
+
+                {/* Financial Summary */}
+                {projectFormData.sponsorship_item_ids.length > 0 && (
+                  <div className="bg-gradient-to-l from-blue-50 to-indigo-50/50 border border-blue-100 rounded-xl p-4 space-y-3">
+                    <p className="text-blue-900/60 text-[11px] font-bold uppercase tracking-wider">
+                      تفصيل العملات المستلمة:
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-white/80 rounded-lg p-3 border border-blue-100/50">
+                        <p className="text-[10px] text-gray-500 mb-0.5">
+                          إجمالي التكلفة (USD)
+                        </p>
+                        <p className="text-lg font-black text-blue-700">
+                          $
+                          {calculateTotalUSD().toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </p>
+                      </div>
+                      <div className="bg-white/80 rounded-lg p-3 border border-green-100/50">
+                        <p className="text-[10px] text-gray-500 mb-0.5">
+                          الصافي بعد الخصم (USD)
+                        </p>
+                        <p className="text-lg font-black text-green-600">
+                          $
+                          {calculateTotalNetUSD().toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </p>
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const selectedItems = (
+                        groupItems[projectModalGroupId] || []
+                      ).filter((item) =>
+                        projectFormData.sponsorship_item_ids.includes(
+                          String(item.id)
+                        )
                       );
-                    })
-                  )}
-                </div>
-                <p className="text-xs text-gray-400 mt-1">
-                  {
-                    projectFormData.sponsorship_item_ids.length === 0
-                      ? 'إذا لم تختر أي كفالة، سيتم إنشاء مشروع لكل كفالات المجموعة'
-                      : `سيتم إنشاء ${projectFormData.sponsorship_item_ids.length} مشروع`
-                  }
-                </p>
-              </div>
+                      const currencyGroups = {};
+                      selectedItems.forEach((item) => {
+                        const currency = item.currency || {};
+                        const key = `${currency.currency_code || "USD"}-${currency.symbol || "$"}`;
+                        if (!currencyGroups[key]) {
+                          currencyGroups[key] = {
+                            code: currency.currency_code || "USD",
+                            symbol: currency.symbol || "$",
+                            exchange_rate: currency.exchange_rate_to_usd || 1,
+                            total: 0,
+                          };
+                        }
+                        currencyGroups[key].total += parseFloat(item.cost || 0);
+                      });
 
-              {/* Currency Exchange Summary */}
-              {projectFormData.sponsorship_item_ids.length > 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
-                  <h4 className="font-semibold text-blue-900 text-sm">ملخص العملات</h4>
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="bg-white rounded-lg p-3 shadow">
-                      <p className="text-gray-600 mb-1">عدد المشاريع</p>
-                      <p className="text-lg font-bold text-blue-600">
-                        {projectFormData.sponsorship_item_ids.length}
-                      </p>
-                    </div>
-                    <div className="bg-white rounded-lg p-3 shadow">
-                      <p className="text-gray-600 mb-1">إجمالي بالدولار</p>
-                      <p className="text-lg font-bold text-green-600">
-                        ${calculateTotalUSD().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </p>
-                    </div>
+                      return Object.values(currencyGroups).map((curr) => (
+                        <div
+                          key={curr.code}
+                          className="flex justify-between items-center text-xs py-1.5 border-b border-blue-100/50 last:border-0"
+                        >
+                          <span className="text-gray-700 font-medium">
+                            {curr.symbol} {curr.code}:{" "}
+                            {curr.total.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                            })}
+                          </span>
+                          <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full font-mono">
+                            Rate: {curr.exchange_rate} → $
+                            {(curr.total * curr.exchange_rate).toLocaleString(
+                              undefined,
+                              { minimumFractionDigits: 2 }
+                            )}
+                          </span>
+                        </div>
+                      ));
+                    })()}
                   </div>
-                  <div className="bg-white rounded-lg p-3 shadow">
-                    <p className="text-gray-600 mb-2">تفصيل العملات:</p>
-                    <div className="space-y-1">
-                      {(() => {
-                        const selectedItems = (groupItems[projectModalGroupId] || []).filter(item => 
-                          projectFormData.sponsorship_item_ids.includes(String(item.id))
-                        );
-                        const currencyGroups = {};
-                        
-                        selectedItems.forEach(item => {
-                          const currency = item.currency || {};
-                          const key = `${currency.currency_code || 'USD'}-${currency.symbol || '$'}`;
-                          if (!currencyGroups[key]) {
-                            currencyGroups[key] = {
-                              code: currency.currency_code || 'USD',
-                              symbol: currency.symbol || '$',
-                              exchange_rate: currency.exchange_rate_to_usd || 1,
-                              total: 0
-                            };
-                          }
-                          currencyGroups[key].total += parseFloat(item.cost || 0);
-                        });
-                        
-                        return Object.values(currencyGroups).map(curr => (
-                          <div key={curr.code} className="flex justify-between items-center text-xs">
-                            <span className="text-gray-700">
-                              {curr.symbol} {curr.code}: {curr.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </span>
-                            <span className="text-gray-500">
-                              (سعر الصرف: {curr.exchange_rate} = ${(curr.total * curr.exchange_rate).toLocaleString(undefined, { minimumFractionDigits: 2 })})
-                            </span>
-                          </div>
-                        ));
-                      })()}
-                    </div>
-                  </div>
+                )}
+
+                {/* Info Note */}
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700">
+                  سيتم إنشاء مشروع منفصل لكل كفالة مختارة مع البيانات المالية الخاصة بها (المبلغ، العملة، الخصم) لضمان الدقة الكاملة في التقارير.
                 </div>
-              )}
+              </form>
+            </div>
 
-              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700">
-                سيتم إنشاء مشروع منفصل لكل كفالة في هذه المجموعة مع البيانات المالية الخاصة بها.
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button type="submit" disabled={creatingProject}
-                  className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 font-semibold"
-                >
-                  {creatingProject ? <Loader2 size={18} className="animate-spin" /> : <Rocket size={18} />}
-                  إنشاء المشاريع
-                </button>
-                <button type="button" onClick={() => setShowProjectModal(false)} className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200">إلغاء</button>
-              </div>
-            </form>
+            {/* Footer - Fixed */}
+            <div className="flex gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
+              <button
+                type="submit"
+                form="project-form"
+                disabled={creatingProject}
+                className="flex-1 px-5 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 font-bold shadow-lg shadow-green-600/20 transition-all hover:shadow-xl hover:shadow-green-600/30 active:scale-[0.98]"
+              >
+                {creatingProject ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Rocket size={18} />
+                )}
+                <span>تأكيد إنشاء المشاريع</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowProjectModal(false)}
+                className="px-6 py-3 bg-white text-gray-600 rounded-xl hover:bg-gray-100 font-semibold transition-all border border-gray-200"
+              >
+                إلغاء
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -408,10 +408,27 @@ class ProjectProposalIndexService
 
     private function applySearchFilter(Builder $query, string $search): void
     {
-        $query->where(function ($q) use ($search) {
-            $q->where('serial_number', 'LIKE', "%{$search}%")
-                ->orWhere('project_name', 'LIKE', "%{$search}%")
-                ->orWhere('donor_name', 'LIKE', "%{$search}%");
+        // ✅ Escape LIKE special characters
+        $escaped = str_replace(
+            ['\\', '%', '_'],
+            ['\\\\', '\\%', '\\_'],
+            $search
+        );
+
+        $query->where(function ($q) use ($escaped) {
+            $q->where('serial_number', 'LIKE', "%{$escaped}%")
+                ->orWhere('project_name', 'LIKE', "%{$escaped}%")
+                ->orWhere('donor_name', 'LIKE', "%{$escaped}%")
+                ->orWhere('donor_code', 'LIKE', "%{$escaped}%")
+                ->orWhere('internal_code', 'LIKE', "%{$escaped}%")
+                // ✅ Search in parent project fields (so child phases are found by parent serial_number etc.)
+                ->orWhereHas('parentProject', function ($pq) use ($escaped) {
+                    $pq->where('serial_number', 'LIKE', "%{$escaped}%")
+                        ->orWhere('project_name', 'LIKE', "%{$escaped}%")
+                        ->orWhere('donor_name', 'LIKE', "%{$escaped}%")
+                        ->orWhere('donor_code', 'LIKE', "%{$escaped}%")
+                        ->orWhere('internal_code', 'LIKE', "%{$escaped}%");
+                });
         });
     }
 

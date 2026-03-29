@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { 
-  AlertCircle, Clock, CheckCircle2 
+import {
+  AlertCircle, Clock, CheckCircle2
 } from 'lucide-react';
 
 // ✅ دالة لتنسيق المبلغ بالدولار
@@ -158,51 +158,52 @@ export const getRemainingDaysBadge = (project) => {
     };
   }
 
-  if (project.remaining_days === null || project.remaining_days === undefined) {
-    if (status === 'ملغى') {
-      return {
-        element: (
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700 border border-gray-300">
-            ملغى
-          </span>
-        ),
-        isOverdue: false,
-        isFinished: true,
-      };
-    }
-    return {
-      element: (
-        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-          مكتمل
-        </span>
-      ),
-      isOverdue: false,
-      isFinished: true,
-    };
-  }
-
+  // ✅ استخدام القيمة القادمة من الباك-إند (تاريخ الاستحقاق والأيام المتبقية)
   const remaining = Number(project.remaining_days);
-  if (!Number.isNaN(remaining) && remaining < 2) {
-    const fromApi = project.delayed_days ?? project.delayedDays;
-    const computed = Math.max(0, 2 - remaining);
-    const raw = (fromApi != null && fromApi > 0) ? fromApi : computed;
-    const delayedDays = Math.max(1, raw);
+  const completionDate = project.estimated_completion_date || project.estimatedCompletionDate;
+
+  const dateFormatted = completionDate ? formatDate(completionDate) : null;
+
+  if (!Number.isNaN(remaining) && remaining < 0) {
+    const delayedDays = Math.abs(remaining);
     return {
       element: (
-        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
-          ⚠️ متأخر بـ {delayedDays} يوم
-        </span>
+        <div className="flex flex-col gap-1 items-end">
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 border border-red-300 shadow-sm" title={`كان يجب انتهاؤه في ${dateFormatted}`}>
+            ⚠️ متأخر بـ {delayedDays} يوم
+          </span>
+          {dateFormatted && <span className="text-[10px] text-red-500 font-medium px-1">الهدف: {dateFormatted}</span>}
+        </div>
       ),
       isOverdue: true,
       isFinished: false,
     };
   }
 
+  // Warning for 0 or 1 day
+  if (!Number.isNaN(remaining) && remaining < 2) {
+    return {
+      element: (
+        <div className="flex flex-col gap-1 items-end">
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 shadow-sm">
+            {remaining === 0 ? 'ينتهي اليوم' : 'يوم واحد متبقي'}
+          </span>
+          {dateFormatted && <span className="text-[10px] text-amber-600 font-medium px-1">الهدف: {dateFormatted}</span>}
+        </div>
+      ),
+      isOverdue: false,
+      isFinished: false,
+    };
+  }
+
   return {
     element: (
-      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-        {project.remaining_days} يوم متبقي
-      </span>
+      <div className="flex flex-col gap-1 items-end">
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300 shadow-sm">
+          {project.remaining_days} يوم متبقي
+        </span>
+        {dateFormatted && <span className="text-[10px] text-gray-400 font-medium px-1">الهدف: {dateFormatted}</span>}
+      </div>
     ),
     isOverdue: false,
     isFinished: false,
@@ -283,10 +284,10 @@ export const isLateForMedia = (project) => {
   if (!project) return false;
   const status = (project.status || '').trim();
   if (status === 'وصل للمتبرع' || status === 'منتهي' || status === 'ملغى') return false;
-  
+
   const executionDate = project.execution_date || project.executionDate;
   if (!executionDate) return false;
-  
+
   try {
     const execTime = new Date(executionDate).getTime();
     const fortyEightHoursInMs = 48 * 60 * 60 * 1000;
@@ -296,15 +297,17 @@ export const isLateForMedia = (project) => {
   }
 };
 
-// ✅ دالة للتحقق من تأخر المشروع لمدير المشاريع (بقاء 2 يوم أو أقل)
+// ✅ دالة للتحقق من تأخر المشروع لمدير المشاريع (remaining_days <= 0 = متأخر)
+// ✅ نفس المنطق المستخدم في صفحة قسم الإعلام
 export const isLateForPM = (project) => {
   if (!project) return false;
   const status = (project.status || '').trim();
-  if (status === 'وصل للمتبرع' || status === 'منتهي' || status === 'ملغى') return false;
+  const notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'ملغى', 'مؤجل'];
+  if (notDelayedStatuses.includes(status)) return false;
 
   const remaining = project.remaining_days ?? project.remainingDays;
   if (remaining === null || remaining === undefined || isNaN(Number(remaining))) return false;
 
-  // Consider delayed only when remaining days is exactly 0
-  return Number(remaining) === 0;
+  // ✅ المشروع متأخر عندما remaining_days <= 0
+  return Number(remaining) <= 0;
 };

@@ -58,6 +58,7 @@ class ProjectProposalQuery
      * ✅ Searchable columns defined once — DRY + easy to maintain
      */
     private const SEARCHABLE_COLUMNS = [
+
         'project_name',
         'serial_number',
         'donor_name',
@@ -157,8 +158,7 @@ class ProjectProposalQuery
     {
         if ($finishedOnly) {
             $query->where('status', 'منتهي');
-        }
-        else {
+        } else {
             $query->where('status', '!=', 'منتهي');
         }
     }
@@ -174,25 +174,28 @@ class ProjectProposalQuery
     private function applyAdminFilter(Builder $query): void
     {
         $query->where(function (Builder $q) {
-            $q->where(function (Builder $subQ) {
+            $q->where(
+                function (Builder $subQ) {
                     // Keep: undivided projects (is_divided_into_phases = false and no parent_project_id)
                     $subQ->where('is_divided_into_phases', false)
                         ->whereNull('parent_project_id');
                 }
-                )->orWhere(function (Builder $subQ) {
-                    // Keep: daily sub-projects (has phase_day OR phase_type = 'daily' with parent_project_id)
-                    $subQ->whereNotNull('phase_day')
-                        ->orWhere('phase_type', 'daily')
-                        ->whereNotNull('parent_project_id');
-                }
-                )->orWhere(function (Builder $subQ) {
-                    // Keep: monthly sub-projects (has month_number OR phase_type = 'monthly' with parent_project_id)
-                    $subQ->whereNotNull('month_number')
-                        ->orWhere('phase_type', 'monthly')
-                        ->whereNotNull('parent_project_id');
-                }
+            )->orWhere(
+                    function (Builder $subQ) {
+                        // Keep: daily sub-projects (has phase_day OR phase_type = 'daily' with parent_project_id)
+                        $subQ->whereNotNull('phase_day')
+                            ->orWhere('phase_type', 'daily')
+                            ->whereNotNull('parent_project_id');
+                    }
+                )->orWhere(
+                    function (Builder $subQ) {
+                        // Keep: monthly sub-projects (has month_number OR phase_type = 'monthly' with parent_project_id)
+                        $subQ->whereNotNull('month_number')
+                            ->orWhere('phase_type', 'monthly')
+                            ->whereNotNull('parent_project_id');
+                    }
                 );
-            });
+        });
     }
 
     /**
@@ -239,10 +242,11 @@ class ProjectProposalQuery
                     $q->whereIn('status', self::COORDINATOR_STATUSES)
                         ->orWhere('is_daily_phase', true)
                         ->orWhere('is_monthly_phase', true)
-                        ->orWhere(fn(Builder $subQ) =>
-                    $subQ->where('is_divided_into_phases', false)
-                    ->where('status', '!=', 'جديد')
-                    );
+                        ->orWhere(
+                            fn(Builder $subQ) =>
+                            $subQ->where('is_divided_into_phases', false)
+                                ->where('status', '!=', 'جديد')
+                        );
                 });
                 break;
 
@@ -269,7 +273,7 @@ class ProjectProposalQuery
         return Cache::remember(
             "user_team_ids:{$userId}",
             now()->addMinutes(10),
-                fn() => DB::table('team_members')
+            fn() => DB::table('team_members')
                 ->where('user_id', $userId)
                 ->pluck('team_id')
                 ->all() // ✅ ->all() returns plain array (faster than ->toArray())
@@ -294,8 +298,7 @@ class ProjectProposalQuery
 
         if (count($values) === 1) {
             $query->where($column, $values[0]);
-        }
-        else {
+        } else {
             $query->whereIn($column, $values);
         }
     }
@@ -319,8 +322,7 @@ class ProjectProposalQuery
 
         if (count($intValues) === 1) {
             $query->where($column, reset($intValues));
-        }
-        else {
+        } else {
             $query->whereIntegerInRaw($column, $intValues);
         }
     }
@@ -375,7 +377,7 @@ class ProjectProposalQuery
      */
     private function applySearchFilter(Builder $query, Request $request): void
     {
-        $searchQuery = trim((string)$request->get('searchQuery', $request->get('search', '')));
+        $searchQuery = trim((string) $request->get('searchQuery', $request->get('search', '')));
 
         if ($searchQuery === '') {
             return;
@@ -383,16 +385,24 @@ class ProjectProposalQuery
 
         // ✅ Escape LIKE special characters so user input like "100%" doesn't break results
         $escaped = str_replace(
-        ['\\', '%', '_'],
-        ['\\\\', '\\%', '\\_'],
+            ['\\', '%', '_'],
+            ['\\\\', '\\%', '\\_'],
             $searchQuery
         );
 
         $query->where(function (Builder $q) use ($escaped) {
             foreach (self::SEARCHABLE_COLUMNS as $index => $column) {
                 $method = $index === 0 ? 'where' : 'orWhere';
-                $q->{ $method}($column, 'like', "%{$escaped}%");
+                $q->{$method}($column, 'like', "%{$escaped}%");
             }
+
+            // ✅ Include the parent project's serial_number and other searchable columns
+            $q->orWhereHas('parentProject', function (Builder $pq) use ($escaped) {
+                foreach (self::SEARCHABLE_COLUMNS as $index => $column) {
+                    $method = $index === 0 ? 'where' : 'orWhere';
+                    $pq->{$method}($column, 'like', "%{$escaped}%");
+                }
+            });
         });
     }
 
@@ -445,8 +455,7 @@ class ProjectProposalQuery
         try {
             Carbon::parse($date);
             return true;
-        }
-        catch (\Exception) {
+        } catch (\Exception) {
             return false;
         }
     }
@@ -490,9 +499,14 @@ class ProjectProposalQuery
         // Montage statuses only (for Media Manager projects list)
         if ($request->boolean('montage_statuses_only')) {
             $query->whereIn('status', [
-                'جاهز للتنفيذ', 'تم اختيار المخيم', 'قيد التنفيذ',
-                'تم التنفيذ', 'في المونتاج', 'تم المونتاج',
-                'معاد مونتاجه', 'وصل للمتبرع'
+                'جاهز للتنفيذ',
+                'تم اختيار المخيم',
+                'قيد التنفيذ',
+                'تم التنفيذ',
+                'في المونتاج',
+                'تم المونتاج',
+                'معاد مونتاجه',
+                'وصل للمتبرع'
             ]);
         }
 
@@ -501,24 +515,27 @@ class ProjectProposalQuery
             $notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'تم التنفيذ', 'منفذ', 'ملغى'];
             $query->whereNotIn('status', $notDelayedStatuses)
                 ->where(function (Builder $q) {
-                $q->where(function (Builder $subQ) {
-                        $subQ->where('is_daily_phase', true)
-                            ->whereNotNull('execution_date')
-                            ->whereRaw("DATEDIFF(execution_date, NOW()) <= 0");
-                    }
-                    )
-                        ->orWhere(function (Builder $subQ) {
-                    $subQ->where(function (Builder $qq) {
-                                $qq->where('is_daily_phase', false)
-                                    ->orWhereNull('is_daily_phase');
-                            }
-                            )
-                                ->whereNotNull('created_at')
-                                ->whereNotNull('estimated_duration_days')
-                                ->whereRaw("DATEDIFF(NOW(), created_at) >= estimated_duration_days");
+                    $q->where(
+                        function (Builder $subQ) {
+                            $subQ->where('is_daily_phase', true)
+                                ->whereNotNull('execution_date')
+                                ->whereRaw("DATEDIFF(execution_date, NOW()) <= 0");
                         }
+                    )
+                        ->orWhere(
+                            function (Builder $subQ) {
+                                $subQ->where(
+                                    function (Builder $qq) {
+                                        $qq->where('is_daily_phase', false)
+                                            ->orWhereNull('is_daily_phase');
+                                    }
+                                )
+                                    ->whereNotNull('created_at')
+                                    ->whereNotNull('estimated_duration_days')
+                                    ->whereRaw("DATEDIFF(NOW(), created_at) >= estimated_duration_days");
+                            }
                         );
-                    });
+                });
         }
     }
 
@@ -528,11 +545,11 @@ class ProjectProposalQuery
     private function applyPhaseTypeFilter(Builder $query, string $phaseType): void
     {
         match ($phaseType) {
-                'daily' => $query->where('is_daily_phase', true),
-                'monthly' => $query->where('is_monthly_phase', true),
-                'parent' => $query->where('is_divided_into_phases', true)->whereNull('parent_project_id'),
-                default => null, // unknown phase_type → no filter
-            };
+            'daily' => $query->where('is_daily_phase', true),
+            'monthly' => $query->where('is_monthly_phase', true),
+            'parent' => $query->where('is_divided_into_phases', true)->whereNull('parent_project_id'),
+            default => null, // unknown phase_type → no filter
+        };
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -555,7 +572,7 @@ class ProjectProposalQuery
 
         if (in_array($userRole, self::PRIVILEGED_ROLES, true)) {
             $relations['assignedToTeam'] = fn($q) =>
-                    $q->select('id', 'team_name')
+                $q->select('id', 'team_name')
                     ->with('photographers:id,name,phone_number');
 
             $relations[] = 'assignedResearcher:id,name,phone_number';
@@ -591,8 +608,7 @@ class ProjectProposalQuery
 
         if ($sortBy !== 'default' && in_array($sortBy, self::ALLOWED_SORT_COLUMNS, true)) {
             $query->orderBy($sortBy, $sortOrder);
-        }
-        else {
+        } else {
             $query->orderBy('created_at', 'desc');
         }
     }
@@ -639,7 +655,7 @@ class ProjectProposalQuery
 
         // ── Report mode: date filters present → allow up to 10 000 ──────────
         if ($hasDateFilter) {
-            $requested = (int)$perPageInput;
+            $requested = (int) $perPageInput;
             if ($requested >= 1) {
                 return min($requested, self::PER_PAGE_MAX_REPORTS);
             }
@@ -661,7 +677,7 @@ class ProjectProposalQuery
 
         // ── Explicit per_page parameter ─────────────────────────────────────
         if ($request->hasAny(['per_page', 'perPage'])) {
-            return $this->clampPerPage((int)$perPageInput, $userRole);
+            return $this->clampPerPage((int) $perPageInput, $userRole);
         }
 
         return self::PER_PAGE_DEFAULT;
@@ -677,7 +693,7 @@ class ProjectProposalQuery
         }
 
         if ($request->hasAny(['per_page', 'perPage'])) {
-            return min(max(1, (int)$input), self::PER_PAGE_MAX_ORPHAN_COORDINATOR);
+            return min(max(1, (int) $input), self::PER_PAGE_MAX_ORPHAN_COORDINATOR);
         }
 
         return 1000; // default for orphan coordinator
@@ -703,7 +719,7 @@ class ProjectProposalQuery
         }
 
         return $userRole === 'media_manager'
-            ?self::PER_PAGE_MAX_MEDIA_MANAGER
+            ? self::PER_PAGE_MAX_MEDIA_MANAGER
             : self::PER_PAGE_MAX_MANAGER;
     }
 
@@ -713,10 +729,10 @@ class ProjectProposalQuery
     private function clampPerPage(int $perPage, string $userRole): int
     {
         $max = match (true) {
-                $userRole === 'media_manager' => self::PER_PAGE_MAX_MEDIA_MANAGER,
-                in_array($userRole, ['admin', 'project_manager'], true) => self::PER_PAGE_MAX_MANAGER,
-                default => self::PER_PAGE_MAX_GENERAL,
-            };
+            $userRole === 'media_manager' => self::PER_PAGE_MAX_MEDIA_MANAGER,
+            in_array($userRole, ['admin', 'project_manager'], true) => self::PER_PAGE_MAX_MANAGER,
+            default => self::PER_PAGE_MAX_GENERAL,
+        };
 
         return min(max(1, $perPage), $max);
     }

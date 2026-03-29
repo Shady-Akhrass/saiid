@@ -1011,12 +1011,16 @@ class ProjectProposal extends Model
      */
     public function isExecutionDelayed()
     {
-        if ($this->status !== 'قيد التنفيذ' || !$this->assignment_date || !$this->estimated_duration_days) {
+        // Use provided duration or fallback to 7 days
+        $duration = $this->estimated_duration_days ?: 7;
+
+        if ($this->status !== 'قيد التنفيذ' || !$this->assignment_date) {
             return false;
         }
 
         $daysSinceAssignment = Carbon::now()->diffInDays(Carbon::parse($this->assignment_date));
-        return $daysSinceAssignment > ($this->estimated_duration_days + 2);
+        // Delay is duration + 2 days buffer
+        return $daysSinceAssignment > ($duration + 2);
     }
 
     /**
@@ -1049,11 +1053,12 @@ class ProjectProposal extends Model
      */
     public function getEstimatedCompletionDate()
     {
-        if (!$this->assignment_date || !$this->estimated_duration_days) {
+        if (!$this->assignment_date) {
             return null;
         }
 
-        return Carbon::parse($this->assignment_date)->addDays($this->estimated_duration_days);
+        $duration = $this->estimated_duration_days ?: 7;
+        return Carbon::parse($this->assignment_date)->addDays($duration);
     }
 
     /**
@@ -1079,8 +1084,8 @@ class ProjectProposal extends Model
      */
     public function getRemainingDays()
     {
-        // ✅ العداد يتوقف فقط عند "وصل للمتبرع" أو "منتهي" أو "تم التنفيذ" (لأن العمل انتهى)
-        $counterStoppedStatuses = ['وصل للمتبرع', 'منتهي', 'تم التنفيذ', 'منفذ'];
+        // ✅ العداد يتوقف فقط عند "وصل للمتبرع" أو "منتهي" (لا يُرجع 0 عند "تم التنفيذ")
+        $counterStoppedStatuses = ['وصل للمتبرع', 'منتهي'];
         if (in_array($this->status, $counterStoppedStatuses)) {
             return null; // المشروع منتهي فعلياً، العداد متوقف
         }
@@ -1117,14 +1122,14 @@ class ProjectProposal extends Model
         }
 
         // للمشاريع الأخرى: استخدام created_at (المنطق القديم)
-        // يجب أن يكون هناك تاريخ إنشاء وعدد أيام مقدرة
-        if (!$this->created_at || !$this->estimated_duration_days) {
+        // إذا لم يتم إدخال مدة التنفيذ، نستخدم 7 أيام كقيمة افتراضية
+        if (!$this->created_at) {
             return null;
         }
 
-        // حساب الأيام المتبقية لجميع الحالات النشطة (جديد، قيد التوريد، قيد التوزيع، جاهز للتنفيذ، قيد التنفيذ، إلخ)
+        $duration = $this->estimated_duration_days ?: 7;
         $daysSinceCreation = $this->getDaysSinceCreation();
-        $remainingDays = $this->estimated_duration_days - $daysSinceCreation;
+        $remainingDays = $duration - $daysSinceCreation;
 
         // نرجع القيمة الفعلية (سواء كانت سالبة أو موجبة)
         return $remainingDays;
@@ -1138,7 +1143,7 @@ class ProjectProposal extends Model
     public function isDelayed()
     {
         // ✅ العداد متوقف أو المرحلة بعد التنفيذ - لا يعتبر متأخر
-        $notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'تم التنفيذ', 'منفذ'];
+        $notDelayedStatuses = ['وصل للمتبرع', 'منتهي'];
         if (in_array($this->status, $notDelayedStatuses)) {
             return false;
         }
@@ -1149,6 +1154,7 @@ class ProjectProposal extends Model
             return false;
         }
 
+        $duration = $this->estimated_duration_days ?: 7;
         $remainingDays = $this->getRemainingDays();
         // متأخر إذا كانت الأيام المتبقية أقل من يومين (0 أو 1 أو سالبة)
         return $remainingDays !== null && $remainingDays < 2;

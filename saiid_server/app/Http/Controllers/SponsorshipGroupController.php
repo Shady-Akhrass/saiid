@@ -355,9 +355,17 @@ class SponsorshipGroupController extends Controller
 
         try {
             foreach ($itemsToProcess as $item) {
-                $discountPct = $item->discount_percentage ?? 0;
-                $discountAmount = $item->cost * ($discountPct / 100);
-                $netAmount = $item->cost - $discountAmount;
+                // Get the current exchange rate for this item's currency
+                $itemCurrency = $item->currency;
+                $currentRate = (float)($itemCurrency->exchange_rate_to_usd ?? 1.0);
+                
+                // Calculate all amounts in USD (Mirroring NewProject.jsx logic)
+                $donationAmount = (float)$item->cost;
+                $amountInUsd = round($donationAmount * $currentRate, 2);
+                
+                $discountPct = (float)($item->discount_percentage ?? 0);
+                $discountAmountUsd = round($amountInUsd * ($discountPct / 100), 2);
+                $netAmountUsd = round($amountInUsd - $discountAmountUsd, 2);
 
                 // Determine the first image path for the legacy notes_image column
                 $firstNoteImagePath = null;
@@ -409,22 +417,19 @@ class SponsorshipGroupController extends Controller
                     $nextItemCode = $codePrefix . '-' . str_pad($usedSequences[$codePrefix] + 1, 4, '0', STR_PAD_LEFT);
                 }
 
-
-
-
                 $project = ProjectProposal::create([
                     'project_name' => $overrideProjectName ?? $group->name,
                     'donor_code' => $projectCode,
                     'donor_name' => $item->name,
                     'project_type_id' => $projectTypeId,
                     'subcategory_id' => $request->subcategory_id,
-                    'donation_amount' => $item->cost,
+                    'donation_amount' => $donationAmount,
                     'currency_id' => $item->currency_id,
-                    'exchange_rate' => $exchangeRate,
-                    'amount_in_usd' => $item->amount_in_usd,
+                    'exchange_rate' => $currentRate,
+                    'amount_in_usd' => $amountInUsd,
                     'admin_discount_percentage' => $discountPct,
-                    'discount_amount' => $discountAmount,
-                    'net_amount' => $netAmount,
+                    'discount_amount' => $discountAmountUsd,
+                    'net_amount' => $netAmountUsd,
                     'beneficiaries_count' => $item->orphans_count,
                     'estimated_duration_days' => $estimatedDuration,
                     'notes' => $item->notes,

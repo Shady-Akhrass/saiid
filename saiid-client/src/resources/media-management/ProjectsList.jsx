@@ -10,7 +10,7 @@ import { toast } from 'react-toastify';
 import UpdateStatusModal from './components/UpdateStatusModal';
 import BatchStatusUpdateForm from './components/BatchStatusUpdateForm';
 import { useUpdateExecutionStatus } from '../../hooks/useUpdateExecutionStatus';
-// ✅ remaining_days badge logic is implemented locally (same as PM list)
+import { getRemainingDaysBadge } from '../project-management/projects/utils/ProjectUIHelpers';
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj ?? {}, key);
 
@@ -46,6 +46,7 @@ const normalizeProjectRecord = (project = {}) => {
     String(project?.is_urgent || '').toLowerCase() === 'true' ||
     Boolean(project?.is_urgent) ||
     false;
+
 
   return normalized;
 };
@@ -270,31 +271,25 @@ const MediaProjectsList = () => {
 
   const renderProjectBadges = (project) => {
     const hasOrphans = project.sponsored_orphans_count > 0 || project.has_sponsored_orphans;
-    
+
     if (!project?.is_daily_phase && !hasOrphans) {
       return null;
     }
 
     return (
       <div className="flex flex-wrap gap-2 mt-1">
-        { project?.is_daily_phase && (
+        {project?.is_daily_phase && (
           <>
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
               مشروع يومي
             </span>
-            { project?.phase_day && (
+            {project?.phase_day && (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-100">
-                اليوم { project.phase_day }
+                اليوم {project.phase_day}
               </span>
-            ) }
+            )}
           </>
-        ) }
-        { hasOrphans && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-700 border border-purple-300 w-fit">
-            <Users className="w-3 h-3" />
-            { project.sponsored_orphans_count || 0 } يتيم مكفول
-          </span>
-        ) }
+        )}
       </div>
     );
   };
@@ -383,7 +378,7 @@ const MediaProjectsList = () => {
     if (import.meta.env.DEV) {
       console.log('🔍 Fetching projects with applied filters:', appliedFilters);
     }
-    
+
     // ✅ إضافة timeout صغير لضمان تحديث state قبل الجلب
     const timeoutId = setTimeout(() => {
       fetchProjects();
@@ -736,28 +731,28 @@ const MediaProjectsList = () => {
     try {
       setIsExporting(true);
       const params = new URLSearchParams();
-      
+
       // إضافة الفلاتر الحالية للتحويل
       if (appliedFilters.execution_date_from) params.append('start_date', appliedFilters.execution_date_from);
       if (appliedFilters.execution_date_to) params.append('end_date', appliedFilters.execution_date_to);
       if (isFinishedProjectsPage) {
-          params.append('finished_only', 'true');
+        params.append('finished_only', 'true');
       }
-      
+
       // إضافة نوع المشروع إذا كان محدداً
       if (Array.isArray(appliedFilters.project_type) && appliedFilters.project_type.length > 0) {
-          params.append('project_type', appliedFilters.project_type.join(','));
+        params.append('project_type', appliedFilters.project_type.join(','));
       }
 
       // إضافة الحالات إذا كانت محددة
       if (Array.isArray(appliedFilters.montage_status) && appliedFilters.montage_status.length > 0) {
-          params.append('statuses', appliedFilters.montage_status.join(','));
+        params.append('statuses', appliedFilters.montage_status.join(','));
       }
-      
+
       const response = await apiClient.get(`/project-proposals/export?${params.toString()}`, {
         responseType: 'blob'
       });
-      
+
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -836,7 +831,7 @@ const MediaProjectsList = () => {
       // ✅ إذا كان هناك producerId في الـ URL، استخدم الـ endpoint الجديد
       if (producerId) {
         endpoint = `/montage-producers/${producerId}/projects`;
- 
+
         if (appliedFilters.execution_date_from) {
           params.append('from_date', appliedFilters.execution_date_from);
         }
@@ -889,10 +884,10 @@ const MediaProjectsList = () => {
           if (firstResponseData.pagination) {
             totalPages = firstResponseData.pagination.last_page || 1;
             perPageValue = firstResponseData.pagination.per_page || perPageValue;
-            } else if (firstResponseData.totalPages) {
-              // ✅ ProjectProposalController@index returns: totalPages/currentPage/perPage
-              totalPages = firstResponseData.totalPages || 1;
-              perPageValue = firstResponseData.perPage || perPageValue;
+          } else if (firstResponseData.totalPages) {
+            // ✅ ProjectProposalController@index returns: totalPages/currentPage/perPage
+            totalPages = firstResponseData.totalPages || 1;
+            perPageValue = firstResponseData.perPage || perPageValue;
           }
           allProjectsDataRaw = firstResponseData.projects || [];
         } else if (firstResponseData.data && firstResponseData.data.data) {
@@ -991,15 +986,15 @@ const MediaProjectsList = () => {
           ? projectsDataRaw.map(normalizeProjectRecord)
           : [];
 
-          if (import.meta.env.DEV) {
-            console.log('📥 MediaProjectsList fetch:', {
-              endpoint,
-              producerId,
-              rawCount: Array.isArray(projectsDataRaw) ? projectsDataRaw.length : 0,
-              normalizedCount: projectsData.length,
-              priority_only: appliedFilters.priority_only,
-            });
-          }
+        if (import.meta.env.DEV) {
+          console.log('📥 MediaProjectsList fetch:', {
+            endpoint,
+            producerId,
+            rawCount: Array.isArray(projectsDataRaw) ? projectsDataRaw.length : 0,
+            normalizedCount: projectsData.length,
+            priority_only: appliedFilters.priority_only,
+          });
+        }
 
         // ✅ Debug: التحقق من وجود subcategory_id في البيانات القادمة من Backend
         if (import.meta.env.DEV && projectsData.length > 0) {
@@ -2001,8 +1996,8 @@ const MediaProjectsList = () => {
   // ✅ التحقق من وجود مشاريع بحالة "قيد التنفيذ" في المشاريع المحددة
   const hasInExecutionProjects = useMemo(() => {
     if (selectedProjects.size === 0) return false;
-    return projects.some(project => 
-      selectedProjects.has(project.id) && 
+    return projects.some(project =>
+      selectedProjects.has(project.id) &&
       (project.status === 'قيد التنفيذ' || project.status === 'جاهز للتنفيذ')
     );
   }, [selectedProjects, projects]);
@@ -2048,7 +2043,7 @@ const MediaProjectsList = () => {
       // ✅ إذا كانت الحالة "تم التنفيذ"، استخدم endpoint مختلف
       if (newStatus === 'تم التنفيذ') {
         // ✅ تحديث كل مشروع على حدة باستخدام updateExecutionStatus
-        const updatePromises = projectIds.map(projectId => 
+        const updatePromises = projectIds.map(projectId =>
           updateExecutionStatus(projectId, 'تم التنفيذ').catch(error => {
             console.error(`Error updating project ${projectId}:`, error);
             return null;
@@ -2057,7 +2052,7 @@ const MediaProjectsList = () => {
 
         const results = await Promise.all(updatePromises);
         const successfulUpdates = results.filter(r => r !== null);
-        
+
         if (successfulUpdates.length > 0) {
           // ✅ تحديث المشاريع المحدثة في القائمة
           successfulUpdates.forEach(project => {
@@ -2067,7 +2062,7 @@ const MediaProjectsList = () => {
           });
 
           toast.success(`تم تحديث حالة ${successfulUpdates.length} مشروع إلى "تم التنفيذ" بنجاح`);
-          
+
           // ✅ مسح التحديد
           setSelectedProjects(new Set());
           setShowBatchStatusModal(false);
@@ -2331,112 +2326,7 @@ const MediaProjectsList = () => {
     return colors[status] || 'bg-gray-100 text-gray-700';
   };
 
-  // ✅ نفس منطق getRemainingDaysBadge الموجود في project-management/projects/ProjectsList.jsx
-      const getRemainingDaysBadge = (project) => {
-    const status = (project?.status || '').trim();
 
-    if (status === 'منتهي') {
-      return {
-        element: (
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
-            ✓ منتهي
-          </span>
-        ),
-        isOverdue: false,
-        isFinished: true,
-      };
-    }
-
-    if (status === 'وصل للمتبرع') {
-      return {
-        element: (
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
-            ✓ وصل للمتبرع
-          </span>
-        ),
-        isOverdue: false,
-        isFinished: true,
-      };
-    }
-
-    const remainingRaw = project?.remaining_days ?? project?.remainingDays;
-    if (remainingRaw === null || remainingRaw === undefined) {
-      if (status === 'ملغى') {
-        return {
-          element: (
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700 border border-gray-300">
-              ملغى
-            </span>
-          ),
-          isOverdue: false,
-          isFinished: true,
-        };
-      }
-      return {
-        element: (
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-            مكتمل
-          </span>
-        ),
-        isOverdue: false,
-        isFinished: true,
-      };
-    }
-
-    const remaining = Number(remainingRaw);
-    const notDelayedStatuses = ['وصل للمتبرع', 'منتهي', 'ملغى'];
-    const isOverdue = !Number.isNaN(remaining) && remaining <= 2 && !notDelayedStatuses.includes(status);
-
-    if (!Number.isNaN(remaining) && remaining <= 0 && !notDelayedStatuses.includes(status)) {
-      const fromApi = project?.delayed_days ?? project?.delayedDays;
-      const computed = Math.abs(remaining);
-      const raw = (fromApi != null && Number(fromApi) > 0) ? Number(fromApi) : computed;
-      let delayedDays = Math.max(1, raw);
-      
-      return {
-        element: (
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-300 shadow-sm">
-            <AlertCircle className="w-3.5 h-3.5" />
-            <span>متأخر</span>
-            <span className="font-extrabold">{delayedDays}</span>
-            <span>يوم</span>
-          </span>
-        ),
-        isOverdue: true,
-        isFinished: false,
-      };
-    }
-
-    if (!Number.isNaN(remaining) && remaining > 0) {
-      let dayText = 'يوم';
-      if (remaining > 2 && remaining <= 10) dayText = 'أيام';
-      else if (remaining > 10) dayText = 'يوما';
-      
-      return {
-        element: (
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300 shadow-sm">
-            <span>متبقي</span>
-            <span className="font-extrabold">{remaining}</span>
-            <span>{dayText}</span>
-          </span>
-        ),
-        isOverdue: isOverdue,
-        isFinished: false,
-      };
-    }
-
-    return {
-      element: (
-        <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300 shadow-sm">
-          <span>متبقي</span>
-          <span className="font-extrabold">{Number.isNaN(remaining) ? '—' : Math.abs(remaining)}</span>
-          <span>يوم</span>
-        </span>
-      ),
-      isOverdue: false,
-      isFinished: false,
-    };
-  };
 
   if (loading) {
     return (
@@ -2447,12 +2337,12 @@ const MediaProjectsList = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-6" style={ { fontFamily: 'Cairo, sans-serif' } }>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-6" style={{ fontFamily: 'Cairo, sans-serif' }}>
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */ }
+        {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="flex-1">
-            { producerId && producerInfo ? (
+            {producerId && producerInfo ? (
               <>
                 <div className="flex items-center gap-3 mb-2">
                   <Link
@@ -2464,32 +2354,31 @@ const MediaProjectsList = () => {
                   </Link>
                 </div>
                 <h1 className="text-3xl font-bold text-gray-800">
-                  مشاريع الممنتج: { producerInfo.name || producerInfo.email || 'غير محدد' }
+                  مشاريع الممنتج: {producerInfo.name || producerInfo.email || 'غير محدد'}
                 </h1>
                 <p className="text-gray-600 mt-1">المشاريع المسندة لهذا الممنتج فقط</p>
               </>
             ) : (
               <>
                 <h1 className="text-3xl font-bold text-gray-800">
-                  { isFinishedProjectsPage ? 'المشاريع المنتهية (الأرشيف)' : 'مشاريع قسم الإعلام' }
+                  {isFinishedProjectsPage ? 'المشاريع المنتهية (الأرشيف)' : 'مشاريع قسم الإعلام'}
                 </h1>
                 <p className="text-gray-600 mt-1">
-                  { isFinishedProjectsPage ? 'عرض وتصدير المشاريع التي اكتملت دورتها تماماً' : 'إدارة ومتابعة مشاريع المونتاج والتنفيذ' }
+                  {isFinishedProjectsPage ? 'عرض وتصدير المشاريع التي اكتملت دورتها تماماً' : 'إدارة ومتابعة مشاريع المونتاج والتنفيذ'}
                 </p>
               </>
-            ) }
+            )}
           </div>
 
           <div className="flex items-center gap-3">
-             {/* ✅ زر التصدير */}
-             <button
+            {/* ✅ زر التصدير */}
+            <button
               onClick={handleExport}
               disabled={isExporting || projects.length === 0}
-              className={`px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md hover:shadow-lg ${
-                isExporting 
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+              className={`px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md hover:shadow-lg ${isExporting
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   : 'bg-white text-green-700 border-2 border-green-200 hover:bg-green-50'
-              }`}
+                }`}
             >
               {isExporting ? (
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600"></div>
@@ -2500,14 +2389,13 @@ const MediaProjectsList = () => {
             </button>
 
             {/* ✅ زر الانتقال بين النشطة والمنتهية */}
-            { !producerId && (
+            {!producerId && (
               <Link
                 to={isFinishedProjectsPage ? "/media-management/projects" : "/media-management/projects/finished"}
-                className={`px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md hover:shadow-lg ${
-                  isFinishedProjectsPage 
-                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white hover:from-sky-600 hover:to-blue-700' 
+                className={`px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md hover:shadow-lg ${isFinishedProjectsPage
+                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white hover:from-sky-600 hover:to-blue-700'
                     : 'bg-white text-gray-700 border-2 border-gray-200 hover:bg-gray-50'
-                }`}
+                  }`}
               >
                 <ChevronLeft className={`w-5 h-5 transition-transform ${isFinishedProjectsPage ? 'rotate-180' : ''}`} />
                 {isFinishedProjectsPage ? 'عرض المشاريع النشطة' : 'عرض المشاريع المنتهية'}
@@ -2516,30 +2404,30 @@ const MediaProjectsList = () => {
           </div>
         </div>
 
-        {/* Search and Filters */ }
+        {/* Search and Filters */}
         <div className="bg-white rounded-2xl p-6 shadow-lg space-y-4">
-          {/* Search */ }
+          {/* Search */}
           <div className="relative">
             <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
               type="text"
               placeholder="بحث في كود التبرع، كود المشروع الداخلي، اسم المشروع، أو اسم المتبرع... (اضغط Enter للتطبيق)"
-              value={ searchInput }
-              onChange={ handleSearchChange }
-              onKeyPress={ handleSearchKeyPress }
+              value={searchInput}
+              onChange={handleSearchChange}
+              onKeyPress={handleSearchKeyPress}
               className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </div>
 
-          {/* Filter Toggle */ }
+          {/* Filter Toggle */}
           <div className="flex items-center justify-between">
             <button
-              onClick={ () => setShowFilters(!showFilters) }
+              onClick={() => setShowFilters(!showFilters)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white hover:bg-sky-50 border-2 border-gray-300 hover:border-sky-400 transition-all shadow-sm"
             >
               <Filter className="w-5 h-5 text-sky-600" />
               <span className="font-semibold text-gray-800">الفلاتر</span>
-              { (() => {
+              {(() => {
                 const activeFiltersCount =
                   (Array.isArray(appliedFilters.montage_status) ? appliedFilters.montage_status.length : 0) +
                   (Array.isArray(appliedFilters.project_type) ? appliedFilters.project_type.length : 0) +
@@ -2554,154 +2442,154 @@ const MediaProjectsList = () => {
 
                 return activeFiltersCount > 0 ? (
                   <span className="bg-gradient-to-r from-sky-500 to-blue-600 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[24px] text-center">
-                    { activeFiltersCount }
+                    {activeFiltersCount}
                   </span>
                 ) : null;
-              })() }
+              })()}
             </button>
           </div>
 
-          {/* Filters Panel */ }
-          { showFilters && (
+          {/* Filters Panel */}
+          {showFilters && (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-gray-200">
-                {/* حالة المونتاج - Dropdown */ }
-                <div className="relative" ref={ statusDropdownRef }>
+                {/* حالة المونتاج - Dropdown */}
+                <div className="relative" ref={statusDropdownRef}>
                   <label className="block text-sm font-medium text-gray-700 mb-2">حالة المونتاج</label>
                   <button
                     type="button"
-                    onClick={ () => setShowStatusDropdown(!showStatusDropdown) }
+                    onClick={() => setShowStatusDropdown(!showStatusDropdown)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 text-right flex items-center justify-between bg-white hover:border-sky-400 transition-colors"
                   >
                     <span className="text-gray-700 font-medium">
-                      { Array.isArray(filters.montage_status) && filters.montage_status.length > 0
+                      {Array.isArray(filters.montage_status) && filters.montage_status.length > 0
                         ? `${filters.montage_status.length} حالة محددة`
                         : 'جميع الحالات'
                       }
                     </span>
-                    <ChevronDown className={ `w-4 h-4 text-gray-500 transition-transform ${showStatusDropdown ? 'rotate-180' : ''}` } />
+                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showStatusDropdown ? 'rotate-180' : ''}`} />
                   </button>
 
-                  { showStatusDropdown && (
+                  {showStatusDropdown && (
                     <div className="absolute z-50 mt-1 w-full bg-white border-2 border-sky-300 rounded-xl shadow-2xl max-h-80 overflow-y-auto">
                       <div className="p-2">
                         <label className="flex items-center gap-2 px-3 py-2 hover:bg-sky-50 rounded-lg cursor-pointer transition-colors">
                           <input
                             type="checkbox"
-                            checked={ Array.isArray(filters.montage_status) && filters.montage_status.length === 0 }
-                            onChange={ () => handleFilterChange('montage_status', []) }
+                            checked={Array.isArray(filters.montage_status) && filters.montage_status.length === 0}
+                            onChange={() => handleFilterChange('montage_status', [])}
                             className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
                           />
                           <span className="text-sm text-gray-800 font-semibold">جميع الحالات</span>
                         </label>
                         <div className="border-t border-gray-200 my-1"></div>
-                        { MONTAGE_STATUSES.map((status) => (
-                          <label key={ status } className="flex items-center gap-2 px-3 py-2 hover:bg-sky-50 rounded-lg cursor-pointer transition-colors">
+                        {MONTAGE_STATUSES.map((status) => (
+                          <label key={status} className="flex items-center gap-2 px-3 py-2 hover:bg-sky-50 rounded-lg cursor-pointer transition-colors">
                             <input
                               type="checkbox"
-                              checked={ Array.isArray(filters.montage_status) && filters.montage_status.includes(status) }
-                              onChange={ (e) => {
+                              checked={Array.isArray(filters.montage_status) && filters.montage_status.includes(status)}
+                              onChange={(e) => {
                                 const current = Array.isArray(filters.montage_status) ? filters.montage_status : [];
                                 const newValue = e.target.checked
                                   ? [...current, status]
                                   : current.filter(s => s !== status);
                                 handleFilterChange('montage_status', newValue);
-                              } }
+                              }}
                               className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
                             />
-                            <span className="text-sm text-gray-700">{ status }</span>
+                            <span className="text-sm text-gray-700">{status}</span>
                           </label>
-                        )) }
+                        ))}
                       </div>
                     </div>
-                  ) }
+                  )}
                 </div>
 
-                {/* نوع المشروع - Dropdown */ }
-                <div className="relative" ref={ projectTypeDropdownRef }>
+                {/* نوع المشروع - Dropdown */}
+                <div className="relative" ref={projectTypeDropdownRef}>
                   <label className="block text-sm font-medium text-gray-700 mb-2">نوع المشروع</label>
                   <button
                     type="button"
-                    onClick={ () => setShowProjectTypeDropdown(!showProjectTypeDropdown) }
-                    disabled={ projectTypesLoading }
+                    onClick={() => setShowProjectTypeDropdown(!showProjectTypeDropdown)}
+                    disabled={projectTypesLoading}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-right flex items-center justify-between bg-white hover:border-purple-400 transition-colors disabled:opacity-50"
                   >
                     <span className="text-gray-700 font-medium">
-                      { Array.isArray(filters.project_type) && filters.project_type.length > 0
+                      {Array.isArray(filters.project_type) && filters.project_type.length > 0
                         ? `${filters.project_type.length} نوع محدد`
                         : 'جميع الأنواع'
                       }
                     </span>
-                    <ChevronDown className={ `w-4 h-4 text-gray-500 transition-transform ${showProjectTypeDropdown ? 'rotate-180' : ''}` } />
+                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showProjectTypeDropdown ? 'rotate-180' : ''}`} />
                   </button>
 
-                  { showProjectTypeDropdown && !projectTypesLoading && (
+                  {showProjectTypeDropdown && !projectTypesLoading && (
                     <div className="absolute z-50 mt-1 w-full bg-white border-2 border-purple-300 rounded-xl shadow-2xl max-h-80 overflow-y-auto">
                       <div className="p-2">
                         <label className="flex items-center gap-2 px-3 py-2 hover:bg-purple-50 rounded-lg cursor-pointer transition-colors">
                           <input
                             type="checkbox"
-                            checked={ Array.isArray(filters.project_type) && filters.project_type.length === 0 }
-                            onChange={ () => handleFilterChange('project_type', []) }
+                            checked={Array.isArray(filters.project_type) && filters.project_type.length === 0}
+                            onChange={() => handleFilterChange('project_type', [])}
                             className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
                           />
                           <span className="text-sm text-gray-800 font-semibold">جميع الأنواع</span>
                         </label>
                         <div className="border-t border-gray-200 my-1"></div>
-                        { projectTypes.map((type) => (
-                          <label key={ type } className="flex items-center gap-2 px-3 py-2 hover:bg-purple-50 rounded-lg cursor-pointer transition-colors">
+                        {projectTypes.map((type) => (
+                          <label key={type} className="flex items-center gap-2 px-3 py-2 hover:bg-purple-50 rounded-lg cursor-pointer transition-colors">
                             <input
                               type="checkbox"
-                              checked={ Array.isArray(filters.project_type) && filters.project_type.includes(type) }
-                              onChange={ (e) => {
+                              checked={Array.isArray(filters.project_type) && filters.project_type.includes(type)}
+                              onChange={(e) => {
                                 const current = Array.isArray(filters.project_type) ? filters.project_type : [];
                                 const newValue = e.target.checked
                                   ? [...current, type]
                                   : current.filter(t => t !== type);
                                 handleFilterChange('project_type', newValue);
-                              } }
+                              }}
                               className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
                             />
-                            <span className="text-sm text-gray-700">{ type }</span>
+                            <span className="text-sm text-gray-700">{type}</span>
                           </label>
-                        )) }
+                        ))}
                       </div>
                     </div>
-                  ) }
+                  )}
                 </div>
 
-                {/* التفريعة - Dropdown */ }
-                <div className="relative" ref={ subcategoryDropdownRef }>
+                {/* التفريعة - Dropdown */}
+                <div className="relative" ref={subcategoryDropdownRef}>
                   <label className="block text-sm font-medium text-gray-700 mb-2">التفريعة</label>
                   <button
                     type="button"
-                    onClick={ () => setShowSubcategoryDropdown(!showSubcategoryDropdown) }
-                    disabled={ subcategoriesLoading }
+                    onClick={() => setShowSubcategoryDropdown(!showSubcategoryDropdown)}
+                    disabled={subcategoriesLoading}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 text-right flex items-center justify-between bg-white hover:border-green-400 transition-colors disabled:opacity-50"
                   >
                     <span className="text-gray-700 font-medium">
-                      { Array.isArray(filters.subcategory_id) && filters.subcategory_id.length > 0
+                      {Array.isArray(filters.subcategory_id) && filters.subcategory_id.length > 0
                         ? `${filters.subcategory_id.length} تفريعة محددة`
                         : 'جميع التفريعات'
                       }
                     </span>
-                    <ChevronDown className={ `w-4 h-4 text-gray-500 transition-transform ${showSubcategoryDropdown ? 'rotate-180' : ''}` } />
+                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showSubcategoryDropdown ? 'rotate-180' : ''}`} />
                   </button>
 
-                  { showSubcategoryDropdown && !subcategoriesLoading && subcategories.length > 0 && (
+                  {showSubcategoryDropdown && !subcategoriesLoading && subcategories.length > 0 && (
                     <div className="absolute z-50 mt-1 w-full bg-white border-2 border-green-300 rounded-xl shadow-2xl max-h-80 overflow-y-auto">
                       <div className="p-2">
                         <label className="flex items-center gap-2 px-3 py-2 hover:bg-green-50 rounded-lg cursor-pointer transition-colors">
                           <input
                             type="checkbox"
-                            checked={ Array.isArray(filters.subcategory_id) && filters.subcategory_id.length === 0 }
-                            onChange={ () => handleFilterChange('subcategory_id', []) }
+                            checked={Array.isArray(filters.subcategory_id) && filters.subcategory_id.length === 0}
+                            onChange={() => handleFilterChange('subcategory_id', [])}
                             className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
                           />
                           <span className="text-sm text-gray-800 font-semibold">جميع التفريعات</span>
                         </label>
                         <div className="border-t border-gray-200 my-1"></div>
-                        { subcategories.map((subcategory) => {
+                        {subcategories.map((subcategory) => {
                           const subcatId = Number(subcategory.id); // ✅ تحويل إلى number
                           const subcatIdStr = String(subcatId);
                           const current = Array.isArray(filters.subcategory_id) ? filters.subcategory_id : [];
@@ -2711,11 +2599,11 @@ const MediaProjectsList = () => {
                           );
 
                           return (
-                            <label key={ subcategory.id } className="flex items-center gap-2 px-3 py-2 hover:bg-green-50 rounded-lg cursor-pointer transition-colors">
+                            <label key={subcategory.id} className="flex items-center gap-2 px-3 py-2 hover:bg-green-50 rounded-lg cursor-pointer transition-colors">
                               <input
                                 type="checkbox"
-                                checked={ isChecked }
-                                onChange={ (e) => {
+                                checked={isChecked}
+                                onChange={(e) => {
                                   if (e.target.checked) {
                                     // ✅ إضافة القيمة كـ number (أو string إذا كانت موجودة بالفعل)
                                     const exists = current.some(id =>
@@ -2732,98 +2620,98 @@ const MediaProjectsList = () => {
                                     );
                                     handleFilterChange('subcategory_id', newValue);
                                   }
-                                } }
+                                }}
                                 className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
                               />
-                              <span className="text-sm text-gray-700">{ subcategory.name_ar || subcategory.name || `التفريعة ${subcategory.id}` }</span>
+                              <span className="text-sm text-gray-700">{subcategory.name_ar || subcategory.name || `التفريعة ${subcategory.id}`}</span>
                             </label>
                           );
-                        }) }
+                        })}
                       </div>
                     </div>
-                  ) }
+                  )}
                 </div>
 
-                {/* الباحث */ }
+                {/* الباحث */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">الباحث</label>
                   <select
-                    value={ filters.researcher_id }
-                    onChange={ (e) => handleFilterChange('researcher_id', e.target.value) }
-                    disabled={ loadingFilterLists }
+                    value={filters.researcher_id}
+                    onChange={(e) => handleFilterChange('researcher_id', e.target.value)}
+                    disabled={loadingFilterLists}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:opacity-50"
                   >
                     <option value="">الكل</option>
-                    { researchers.map((researcher) => (
-                      <option key={ researcher.id } value={ researcher.id }>
-                        { researcher.name || researcher.email || `الباحث ${researcher.id}` }
+                    {researchers.map((researcher) => (
+                      <option key={researcher.id} value={researcher.id}>
+                        {researcher.name || researcher.email || `الباحث ${researcher.id}`}
                       </option>
-                    )) }
+                    ))}
                   </select>
                 </div>
 
-                {/* المصور */ }
+                {/* المصور */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">المصور</label>
                   <select
-                    value={ filters.photographer_id }
-                    onChange={ (e) => handleFilterChange('photographer_id', e.target.value) }
-                    disabled={ loadingFilterLists }
+                    value={filters.photographer_id}
+                    onChange={(e) => handleFilterChange('photographer_id', e.target.value)}
+                    disabled={loadingFilterLists}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:opacity-50"
                   >
                     <option value="">الكل</option>
-                    { photographers.map((photographer) => (
-                      <option key={ photographer.id } value={ photographer.id }>
-                        { photographer.name || photographer.email || `المصور ${photographer.id}` }
+                    {photographers.map((photographer) => (
+                      <option key={photographer.id} value={photographer.id}>
+                        {photographer.name || photographer.email || `المصور ${photographer.id}`}
                       </option>
-                    )) }
+                    ))}
                   </select>
                 </div>
 
-                {/* الممنتج - يظهر فقط إذا لم يكن هناك producerId في الـ URL */ }
-                { !producerId && (
+                {/* الممنتج - يظهر فقط إذا لم يكن هناك producerId في الـ URL */}
+                {!producerId && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">الممنتج</label>
                     <select
-                      value={ filters.producer_id }
-                      onChange={ (e) => handleFilterChange('producer_id', e.target.value) }
-                      disabled={ loadingProducers }
+                      value={filters.producer_id}
+                      onChange={(e) => handleFilterChange('producer_id', e.target.value)}
+                      disabled={loadingProducers}
                       className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
                     >
                       <option value="">الكل</option>
-                      { producers.map((producer) => (
-                        <option key={ producer.id } value={ producer.id }>
-                          { producer.name || producer.email || `الممنتج ${producer.id}` }
+                      {producers.map((producer) => (
+                        <option key={producer.id} value={producer.id}>
+                          {producer.name || producer.email || `الممنتج ${producer.id}`}
                         </option>
-                      )) }
+                      ))}
                     </select>
                   </div>
-                ) }
+                )}
 
-                {/* المشروع الأصلي */ }
+                {/* المشروع الأصلي */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">المشروع الأصلي</label>
                   <select
-                    value={ filters.parent_project_id }
-                    onChange={ (e) => handleFilterChange('parent_project_id', e.target.value) }
-                    disabled={ parentProjectsLoading }
+                    value={filters.parent_project_id}
+                    onChange={(e) => handleFilterChange('parent_project_id', e.target.value)}
+                    disabled={parentProjectsLoading}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                   >
                     <option value="">الكل</option>
-                    { parentProjects.map((parentProject) => (
-                      <option key={ parentProject.id } value={ parentProject.id }>
-                        { getProjectCode(parentProject) } - { parentProject.project_name || parentProject.project_description || `المشروع ${parentProject.id}` }
+                    {parentProjects.map((parentProject) => (
+                      <option key={parentProject.id} value={parentProject.id}>
+                        {getProjectCode(parentProject)} - {parentProject.project_name || parentProject.project_description || `المشروع ${parentProject.id}`}
                       </option>
-                    )) }
+                    ))}
                   </select>
                 </div>
 
-                {/* الترتيب */ }
+                {/* الترتيب */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">الترتيب</label>
                   <select
-                    value={ filters.sort_by }
-                    onChange={ (e) => handleFilterChange('sort_by', e.target.value) }
+                    value={filters.sort_by}
+                    onChange={(e) => handleFilterChange('sort_by', e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
                   >
                     <option value="date">حسب التاريخ (الأحدث أولاً)</option>
@@ -2832,35 +2720,35 @@ const MediaProjectsList = () => {
                   </select>
                 </div>
 
-                {/* تاريخ التنفيذ من */ }
+                {/* تاريخ التنفيذ من */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">تاريخ التنفيذ من</label>
                   <input
                     type="date"
-                    value={ filters.execution_date_from }
-                    onChange={ (e) => handleFilterChange('execution_date_from', e.target.value) }
+                    value={filters.execution_date_from}
+                    onChange={(e) => handleFilterChange('execution_date_from', e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
 
-                {/* تاريخ التنفيذ إلى */ }
+                {/* تاريخ التنفيذ إلى */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">تاريخ التنفيذ إلى</label>
                   <input
                     type="date"
-                    value={ filters.execution_date_to }
-                    onChange={ (e) => handleFilterChange('execution_date_to', e.target.value) }
+                    value={filters.execution_date_to}
+                    onChange={(e) => handleFilterChange('execution_date_to', e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
 
-                {/* المشاريع المتأخرة فقط */ }
+                {/* المشاريع المتأخرة فقط */}
                 <div className="flex items-center">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={ filters.priority_only }
-                      onChange={ (e) => handleFilterChange('priority_only', e.target.checked) }
+                      checked={filters.priority_only}
+                      onChange={(e) => handleFilterChange('priority_only', e.target.checked)}
                       className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500"
                     />
                     <span className="text-sm text-gray-700">المشاريع المتأخرة فقط</span>
@@ -2868,16 +2756,16 @@ const MediaProjectsList = () => {
                 </div>
               </div>
 
-              {/* Apply and Clear Filters Buttons */ }
+              {/* Apply and Clear Filters Buttons */}
               <div className="flex flex-col sm:flex-row gap-3 pt-6 border-t border-gray-200 mt-6">
-                {/* Apply Filters Button */ }
+                {/* Apply Filters Button */}
                 <button
-                  onClick={ handleApplyFilters }
+                  onClick={handleApplyFilters}
                   className="flex-1 px-6 py-3 bg-gradient-to-r from-sky-500 to-blue-600 text-white font-bold rounded-xl hover:from-sky-600 hover:to-blue-700 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2 relative"
                 >
                   <Filter className="w-5 h-5" />
                   تطبيق الفلترة
-                  { (() => {
+                  {(() => {
                     // ✅ التحقق من وجود تغييرات غير مطبقة
                     const hasChanges = JSON.stringify(filters) !== JSON.stringify(appliedFilters);
                     return hasChanges ? (
@@ -2885,12 +2773,12 @@ const MediaProjectsList = () => {
                         جديد
                       </span>
                     ) : null;
-                  })() }
+                  })()}
                 </button>
 
-                {/* Clear Filters Button */ }
+                {/* Clear Filters Button */}
                 <button
-                  onClick={ () => {
+                  onClick={() => {
                     // مسح الفلاتر
                     const emptyFilters = {
                       montage_status: [],
@@ -2922,7 +2810,7 @@ const MediaProjectsList = () => {
                       fetchProjects();
                     }, 100);
                     toast.success('تم مسح جميع الفلاتر');
-                  } }
+                  }}
                   className="flex-1 sm:flex-initial px-6 py-3 bg-gradient-to-r from-red-100 to-pink-100 text-red-700 font-bold rounded-xl hover:from-red-200 hover:to-pink-200 transition-all border-2 border-red-300 flex items-center justify-center gap-2"
                 >
                   <X className="w-5 h-5" />
@@ -2930,58 +2818,57 @@ const MediaProjectsList = () => {
                 </button>
               </div>
             </>
-          ) }
+          )}
         </div>
 
-        {/* Projects Table */ }
+        {/* Projects Table */}
         <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-          {/* ✅ Toolbar للتحديد الجماعي */ }
-          { projects.length > 0 && selectedProjects.size > 0 && (
+          {/* ✅ Toolbar للتحديد الجماعي */}
+          {projects.length > 0 && selectedProjects.size > 0 && (
             <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-b-2 border-purple-200 flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-3">
                 <span className="text-sm font-semibold text-purple-700">
-                  تم تحديد { selectedProjects.size } مشروع
+                  تم تحديد {selectedProjects.size} مشروع
                 </span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={ handleBatchStatusUpdate }
+                  onClick={handleBatchStatusUpdate}
                   className="px-4 py-2 bg-gradient-to-r from-sky-500 to-blue-600 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-2"
                 >
                   <Video className="w-4 h-4" />
                   تحديث الحالة للمحدد
                 </button>
                 <button
-                  onClick={ handleBatchAssign }
-                  disabled={ !canAssignToProducer }
-                  className={ `px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                    canAssignToProducer
+                  onClick={handleBatchAssign}
+                  disabled={!canAssignToProducer}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${canAssignToProducer
                       ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:shadow-lg'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed opacity-50'
-                  }` }
-                  title={ !canAssignToProducer ? 'لا يمكن إسناد المشاريع بحالة "قيد التنفيذ" للممنتج. يجب أن تكون الحالة "تم التنفيذ" أو ما بعده.' : '' }
+                    }`}
+                  title={!canAssignToProducer ? 'لا يمكن إسناد المشاريع بحالة "قيد التنفيذ" للممنتج. يجب أن تكون الحالة "تم التنفيذ" أو ما بعده.' : ''}
                 >
                   <UserPlus className="w-4 h-4" />
                   إسناد للممنتج للمحدد
                 </button>
                 <button
-                  onClick={ () => setSelectedProjects(new Set()) }
+                  onClick={() => setSelectedProjects(new Set())}
                   className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-all"
                 >
                   إلغاء التحديد
                 </button>
               </div>
             </div>
-          ) }
-          {/* ✅ شريط عداد مشاريع الإعلام (يستثني المنتهية) */ }
-          { projects.length > 0 && (
+          )}
+          {/* ✅ شريط عداد مشاريع الإعلام (يستثني المنتهية) */}
+          {projects.length > 0 && (
             <div className="p-4 border-b border-gray-200 flex items-center justify-end">
               <div className="text-sm text-gray-600">
-                إجمالي المشاريع: <span className="font-bold text-sky-700">{ projects.filter(p => p?.status !== 'منتهي').length }</span>
+                إجمالي المشاريع: <span className="font-bold text-sky-700">{projects.filter(p => p?.status !== 'منتهي').length}</span>
               </div>
             </div>
-          ) }
-          { projects.length === 0 ? (
+          )}
+          {projects.length === 0 ? (
             <div className="py-12 text-center text-gray-500">
               <Video className="w-12 h-12 mx-auto mb-4 text-gray-400" />
               <p>لا توجد مشاريع</p>
@@ -2995,8 +2882,8 @@ const MediaProjectsList = () => {
                       <th className="text-center py-4 px-6 text-sm font-semibold w-12">
                         <input
                           type="checkbox"
-                          checked={ selectedProjects.size === projects.length && projects.length > 0 }
-                          onChange={ handleSelectAll }
+                          checked={selectedProjects.size === projects.length && projects.length > 0}
+                          onChange={handleSelectAll}
                           className="w-5 h-5 rounded border-gray-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
                           title="تحديد الكل"
                         />
@@ -3014,7 +2901,7 @@ const MediaProjectsList = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    { projects.map((project) => {
+                    {projects.map((project) => {
                       // ✅ التحقق من جميع الصيغ المحتملة للحالة
                       const status = project.status || '';
                       const statusLower = status.toLowerCase();
@@ -3068,70 +2955,70 @@ const MediaProjectsList = () => {
 
                       return (
                         <tr
-                          key={ project.id }
-                          className={ rowClassName }
+                          key={project.id}
+                          className={rowClassName}
                         >
                           <td className="py-4 px-6 text-center">
                             <input
                               type="checkbox"
-                              checked={ selectedProjects.has(project.id) }
-                              onChange={ () => handleSelectProject(project.id) }
+                              checked={selectedProjects.has(project.id)}
+                              onChange={() => handleSelectProject(project.id)}
                               className="w-5 h-5 rounded border-gray-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
                             />
                           </td>
                           <td className="py-4 px-6 text-sm font-medium text-gray-800">
-                            { project.donor_code || getProjectCode(project) }
+                            {project.donor_code || getProjectCode(project)}
                           </td>
                           <td className="py-4 px-6 text-sm text-gray-700">
                             <div className="flex flex-col">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span>{ project.project_name || project.project_description || '---' }</span>
-                                { isUrgent && (
+                                <span>{project.project_name || project.project_description || '---'}</span>
+                                {isUrgent && (
                                   <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-red-600 text-white border-2 border-red-700 shadow-lg animate-pulse ring-2 ring-red-400" title="مشروع عاجل">
                                     <AlertCircle className="w-4 h-4" />
                                     عاجل
                                   </span>
-                                ) }
-                                { getRemainingDaysBadge(project).element }
-                                { project.status === 'تم التنفيذ' && (
+                                )}
+                                {getRemainingDaysBadge(project).element}
+                                {project.status === 'تم التنفيذ' && (
                                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-200 animate-pulse">
                                     جديد
                                   </span>
-                                ) }
-                                { isRemontage && (
+                                )}
+                                {isRemontage && (
                                   <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-red-500 to-red-600 text-white border-2 border-red-700 shadow-lg animate-pulse">
                                     <AlertCircle className="w-3.5 h-3.5" />
                                     ⚠️ يجب إعادة المونتاج
                                   </span>
-                                ) }
+                                )}
                               </div>
-                              { renderProjectBadges(project) }
-                              { project.parent_project?.project_name && (
+                              {renderProjectBadges(project)}
+                              {project.parent_project?.project_name && (
                                 <span className="text-xs text-gray-500">
-                                  من: { project.parent_project.project_name }
+                                  من: {project.parent_project.project_name}
                                 </span>
-                              ) }
+                              )}
                             </div>
                           </td>
                           <td className="py-4 px-6 text-sm text-gray-700">
-                            { project.phase_day ? `اليوم ${project.phase_day}` : '---' }
+                            {project.phase_day ? `اليوم ${project.phase_day}` : '---'}
                           </td>
-                          <td className="py-4 px-6 text-sm text-gray-700">{ project.donor_name || '---' }</td>
-                        
+                          <td className="py-4 px-6 text-sm text-gray-700">{project.donor_name || '---'}</td>
+
                           <td className="py-4 px-6">
-                            <span className={ `inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${isRemontage ? 'bg-gradient-to-r from-red-100 to-red-200 text-red-800 border-2 border-red-400 font-bold shadow-md' : getStatusColor(project.status)}` }>
-                              { isRemontage && (
+                            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${isRemontage ? 'bg-gradient-to-r from-red-100 to-red-200 text-red-800 border-2 border-red-400 font-bold shadow-md' : getStatusColor(project.status)}`}>
+                              {isRemontage && (
                                 <AlertCircle className="w-3.5 h-3.5" />
-                              ) }
-                              { isRemontage ? 'معاد مونتاجه' : project.status }
+                              )}
+                              {isRemontage ? 'معاد مونتاجه' : project.status}
                             </span>
                           </td>
-                          <td className="py-4 px-6 text-sm text-gray-700">{ formatDate(project.execution_date) }</td>
+                          <td className="py-4 px-6 text-sm text-gray-700">{formatDate(project.execution_date)}</td>
                           <td className="py-4 px-6 text-sm text-gray-700">
-                            { getPhotographerName(project) || 'غير محدد' }
+                            {getPhotographerName(project) || 'غير محدد'}
                           </td>
                           <td className="py-4 px-6 text-sm text-gray-700">
-                            { (() => {
+                            {(() => {
                               // ✅ محاولة جلب اسم الممنتج من جميع المصادر المحتملة
                               const producerName =
                                 project.assigned_montage_producer?.name ||
@@ -3157,64 +3044,64 @@ const MediaProjectsList = () => {
                               }
 
                               return producerName || 'غير محدد';
-                            })() }
+                            })()}
                           </td>
-                          {/* ✅ عمود سبب الرفض - يظهر للمشاريع المعادة للمونتاج */ }
+                          {/* ✅ عمود سبب الرفض - يظهر للمشاريع المعادة للمونتاج */}
                           <td className="py-4 px-6 text-sm text-gray-700">
-                            { isRemontage ? (
+                            {isRemontage ? (
                               <div className="max-w-xs">
-                                { project.rejection_reason || project.media_rejection_reason || project.admin_rejection_reason ? (
+                                {project.rejection_reason || project.media_rejection_reason || project.admin_rejection_reason ? (
                                   <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                                     <p className="text-xs font-semibold text-red-700 mb-1 flex items-center gap-1">
                                       <AlertCircle className="w-3 h-3" />
                                       سبب الرفض:
                                     </p>
                                     <p className="text-sm text-gray-800 whitespace-pre-wrap">
-                                      { project.rejection_reason || project.media_rejection_reason || project.admin_rejection_reason }
+                                      {project.rejection_reason || project.media_rejection_reason || project.admin_rejection_reason}
                                     </p>
                                   </div>
                                 ) : (
                                   <span className="text-gray-400 text-xs italic">لا يوجد سبب محدد</span>
-                                ) }
+                                )}
                               </div>
                             ) : (
                               <span className="text-gray-400 text-xs">---</span>
-                            ) }
+                            )}
                           </td>
                           <td className="py-4 px-6">
                             <div className="flex items-center justify-center gap-2">
-                              {/* ✅ زر تنزيل الصورة - يظهر فقط إذا كانت هناك صورة حقيقية */ }
-                              { hasProjectImage(project) && (
+                              {/* ✅ زر تنزيل الصورة - يظهر فقط إذا كانت هناك صورة حقيقية */}
+                              {hasProjectImage(project) && (
                                 <button
-                                  onClick={ () => handleDownloadImage(project) }
+                                  onClick={() => handleDownloadImage(project)}
                                   className="bg-green-100 hover:bg-green-200 text-green-700 p-2 rounded-lg transition-colors"
                                   title="تنزيل الصورة"
                                 >
                                   <Download className="w-4 h-4" />
                                 </button>
-                              ) }
-                              {/* ✅ زر إعادة الإسناد - متاح لمدير الإعلام في جميع الحالات المناسبة */ }
-                              { (['تم التنفيذ', 'منفذ', 'في المونتاج', 'تم المونتاج', 'معاد مونتاجه'].includes(project.status)) && (
+                              )}
+                              {/* ✅ زر إعادة الإسناد - متاح لمدير الإعلام في جميع الحالات المناسبة */}
+                              {(['تم التنفيذ', 'منفذ', 'في المونتاج', 'تم المونتاج', 'معاد مونتاجه'].includes(project.status)) && (
                                 <button
-                                  onClick={ () => handleAssignProducer(project) }
+                                  onClick={() => handleAssignProducer(project)}
                                   className="bg-purple-100 hover:bg-purple-200 text-purple-700 p-2 rounded-lg transition-colors"
-                                  title={ project.assigned_montage_producer_id ? 'إعادة إسناد لممنتج' : 'إسناد لممنتج' }
+                                  title={project.assigned_montage_producer_id ? 'إعادة إسناد لممنتج' : 'إسناد لممنتج'}
                                 >
                                   <UserPlus className="w-4 h-4" />
                                 </button>
-                              ) }
-                              {/* ✅ زر تحديث الحالة - يظهر للمشاريع "قيد التنفيذ" و "تم التنفيذ" وما بعدها */ }
-                              { (['قيد التنفيذ', 'تم التنفيذ', 'منفذ', 'في المونتاج', 'تم المونتاج', 'معاد مونتاجه', 'وصل للمتبرع'].includes(project.status)) && (
+                              )}
+                              {/* ✅ زر تحديث الحالة - يظهر للمشاريع "قيد التنفيذ" و "تم التنفيذ" وما بعدها */}
+                              {(['قيد التنفيذ', 'تم التنفيذ', 'منفذ', 'في المونتاج', 'تم المونتاج', 'معاد مونتاجه', 'وصل للمتبرع'].includes(project.status)) && (
                                 <button
-                                  onClick={ () => handleUpdateStatus(project) }
+                                  onClick={() => handleUpdateStatus(project)}
                                   className="bg-sky-100 hover:bg-sky-200 text-sky-700 p-2 rounded-lg transition-colors"
                                   title="تحديث الحالة"
                                 >
                                   <Video className="w-4 h-4" />
                                 </button>
-                              ) }
+                              )}
                               <Link
-                                to={ `/media-management/projects/${project.id}` }
+                                to={`/media-management/projects/${project.id}`}
                                 className="bg-blue-100 hover:bg-blue-200 text-blue-700 p-2 rounded-lg transition-colors"
                                 title="عرض التفاصيل"
                               >
@@ -3224,42 +3111,42 @@ const MediaProjectsList = () => {
                           </td>
                         </tr>
                       );
-                    }) }
+                    })}
                   </tbody>
                 </table>
               </div>
 
-              {/* ✅ pagination مُزالة - جميع المشاريع تُعرض في نفس الصفحة */ }
+              {/* ✅ pagination مُزالة - جميع المشاريع تُعرض في نفس الصفحة */}
             </>
-          ) }
+          )}
         </div>
 
-        {/* Update Status Modal */ }
+        {/* Update Status Modal */}
         {
           showUpdateModal && selectedProject && (
             <UpdateStatusModal
-              project={ selectedProject }
-              onClose={ () => {
+              project={selectedProject}
+              onClose={() => {
                 setShowUpdateModal(false);
                 setSelectedProject(null);
-              } }
-              onSuccess={ handleStatusUpdated }
+              }}
+              onSuccess={handleStatusUpdated}
             />
           )
         }
 
-        {/* ✅ Batch Status Update Modal */ }
-        { showBatchStatusModal && (
+        {/* ✅ Batch Status Update Modal */}
+        {showBatchStatusModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" style={ { fontFamily: 'Cairo, sans-serif' } }>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" style={{ fontFamily: 'Cairo, sans-serif' }}>
               <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
                 <h2 className="text-2xl font-bold text-gray-800">
-                  تحديث حالة { selectedProjects.size } مشروع
+                  تحديث حالة {selectedProjects.size} مشروع
                 </h2>
                 <button
-                  onClick={ () => setShowBatchStatusModal(false) }
+                  onClick={() => setShowBatchStatusModal(false)}
                   className="text-gray-400 hover:text-gray-600 transition-colors"
-                  disabled={ batchLoading }
+                  disabled={batchLoading}
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -3268,36 +3155,36 @@ const MediaProjectsList = () => {
               <div className="p-6 space-y-6">
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                   <p className="text-sm text-blue-800">
-                    سيتم تحديث حالة <strong>{ selectedProjects.size }</strong> مشروع إلى الحالة المختارة
+                    سيتم تحديث حالة <strong>{selectedProjects.size}</strong> مشروع إلى الحالة المختارة
                   </p>
                 </div>
 
                 <BatchStatusUpdateForm
-                  onSubmit={ handleBatchStatusSubmit }
-                  onCancel={ () => setShowBatchStatusModal(false) }
-                  loading={ batchLoading }
-                  hasInExecutionProjects={ hasInExecutionProjects }
+                  onSubmit={handleBatchStatusSubmit}
+                  onCancel={() => setShowBatchStatusModal(false)}
+                  loading={batchLoading}
+                  hasInExecutionProjects={hasInExecutionProjects}
                 />
               </div>
             </div>
           </div>
-        ) }
+        )}
 
-        {/* ✅ Batch Assign Modal */ }
-        { showBatchAssignModal && (
+        {/* ✅ Batch Assign Modal */}
+        {showBatchAssignModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" style={ { fontFamily: 'Cairo, sans-serif' } }>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" style={{ fontFamily: 'Cairo, sans-serif' }}>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-gray-800">
-                  إسناد { selectedProjects.size } مشروع لممنتج
+                  إسناد {selectedProjects.size} مشروع لممنتج
                 </h2>
                 <button
-                  onClick={ () => {
+                  onClick={() => {
                     setShowBatchAssignModal(false);
                     setSelectedProducerId('');
-                  } }
+                  }}
                   className="text-gray-400 hover:text-gray-600 transition-colors"
-                  disabled={ batchLoading }
+                  disabled={batchLoading}
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -3306,7 +3193,7 @@ const MediaProjectsList = () => {
               <div className="space-y-4">
                 <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
                   <p className="text-sm text-purple-800">
-                    سيتم إسناد <strong>{ selectedProjects.size }</strong> مشروع للممنتج المختار
+                    سيتم إسناد <strong>{selectedProjects.size}</strong> مشروع للممنتج المختار
                   </p>
                 </div>
 
@@ -3314,42 +3201,42 @@ const MediaProjectsList = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     اختر الممنتج <span className="text-red-500">*</span>
                   </label>
-                  { loadingProducers ? (
+                  {loadingProducers ? (
                     <div className="flex justify-center py-4">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
                     </div>
                   ) : (
                     <select
-                      value={ selectedProducerId }
-                      onChange={ (e) => setSelectedProducerId(e.target.value) }
+                      value={selectedProducerId}
+                      onChange={(e) => setSelectedProducerId(e.target.value)}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       required
-                      disabled={ batchLoading }
+                      disabled={batchLoading}
                     >
                       <option value="">اختر ممنتج</option>
-                      { producers.map((producer) => (
-                        <option key={ producer.id } value={ producer.id }>
-                          { producer.name }
+                      {producers.map((producer) => (
+                        <option key={producer.id} value={producer.id}>
+                          {producer.name}
                         </option>
-                      )) }
+                      ))}
                     </select>
-                  ) }
+                  )}
                 </div>
 
                 <div className="flex gap-3 pt-4">
                   <button
-                    onClick={ () => handleBatchAssignSubmit(selectedProducerId) }
-                    disabled={ batchLoading || !selectedProducerId }
+                    onClick={() => handleBatchAssignSubmit(selectedProducerId)}
+                    disabled={batchLoading || !selectedProducerId}
                     className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:shadow-lg transition-shadow disabled:opacity-50"
                   >
-                    { batchLoading ? 'جاري الإسناد...' : 'تأكيد الإسناد' }
+                    {batchLoading ? 'جاري الإسناد...' : 'تأكيد الإسناد'}
                   </button>
                   <button
-                    onClick={ () => {
+                    onClick={() => {
                       setShowBatchAssignModal(false);
                       setSelectedProducerId('');
-                    } }
-                    disabled={ batchLoading }
+                    }}
+                    disabled={batchLoading}
                     className="px-6 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     إلغاء
@@ -3358,24 +3245,24 @@ const MediaProjectsList = () => {
               </div>
             </div>
           </div>
-        ) }
+        )}
 
-        {/* ✅ Modal تحديث حالة التنفيذ (تم التنفيذ / تأجيل) - للمشاريع في حالة "قيد التنفيذ" */ }
-        { showExecutionStatusModal && selectedProjectForStatusUpdate && (
+        {/* ✅ Modal تحديث حالة التنفيذ (تم التنفيذ / تأجيل) - للمشاريع في حالة "قيد التنفيذ" */}
+        {showExecutionStatusModal && selectedProjectForStatusUpdate && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" style={ { fontFamily: 'Cairo, sans-serif' } }>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" style={{ fontFamily: 'Cairo, sans-serif' }}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-gray-800 flex items-center">
                   <CheckCircle className="w-5 h-5 ml-2 text-purple-500" />
                   تحديث حالة المشروع
                 </h2>
                 <button
-                  onClick={ () => {
+                  onClick={() => {
                     setShowExecutionStatusModal(false);
                     setSelectedProjectForStatusUpdate(null);
                     setExecutionStatusAction(null);
                     setPostponementReason('');
-                  } }
+                  }}
                   className="text-gray-400 hover:text-gray-600 transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -3384,25 +3271,25 @@ const MediaProjectsList = () => {
 
               <div className="mb-4">
                 <p className="text-sm text-gray-600 mb-2">
-                  المشروع: <span className="font-semibold text-gray-800">{ selectedProjectForStatusUpdate.project_name || selectedProjectForStatusUpdate.donor_name || 'غير محدد' }</span>
+                  المشروع: <span className="font-semibold text-gray-800">{selectedProjectForStatusUpdate.project_name || selectedProjectForStatusUpdate.donor_name || 'غير محدد'}</span>
                 </p>
                 <p className="text-sm text-gray-600">
-                  الحالة الحالية: <span className="font-semibold text-purple-600">{ selectedProjectForStatusUpdate.status }</span>
+                  الحالة الحالية: <span className="font-semibold text-purple-600">{selectedProjectForStatusUpdate.status}</span>
                 </p>
               </div>
 
-              { !executionStatusAction ? (
+              {!executionStatusAction ? (
                 <div className="space-y-3 mb-6">
                   <p className="text-sm font-medium text-gray-700 mb-3">اختر الإجراء المطلوب:</p>
                   <button
-                    onClick={ () => setExecutionStatusAction('completed') }
+                    onClick={() => setExecutionStatusAction('completed')}
                     className="w-full px-4 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-colors"
                   >
                     <CheckCircle className="w-5 h-5" />
                     تم التنفيذ
                   </button>
                   <button
-                    onClick={ () => setExecutionStatusAction('postpone') }
+                    onClick={() => setExecutionStatusAction('postpone')}
                     className="w-full px-4 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-colors"
                   >
                     <Pause className="w-5 h-5" />
@@ -3416,18 +3303,18 @@ const MediaProjectsList = () => {
                   </p>
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={ () => setExecutionStatusAction(null) }
-                      disabled={ updatingStatus }
+                      onClick={() => setExecutionStatusAction(null)}
+                      disabled={updatingStatus}
                       className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors disabled:opacity-50"
                     >
                       رجوع
                     </button>
                     <button
-                      onClick={ handleCompleteExecution }
-                      disabled={ updatingStatus }
+                      onClick={handleCompleteExecution}
+                      disabled={updatingStatus}
                       className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      { updatingStatus ? (
+                      {updatingStatus ? (
                         <>
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white ml-2"></div>
                           جاري التحديث...
@@ -3437,7 +3324,7 @@ const MediaProjectsList = () => {
                           <CheckCircle className="w-4 h-4 ml-2" />
                           تأكيد
                         </>
-                      ) }
+                      )}
                     </button>
                   </div>
                 </div>
@@ -3448,10 +3335,10 @@ const MediaProjectsList = () => {
                       سبب التأجيل <span className="text-red-500">*</span>
                     </label>
                     <textarea
-                      value={ postponementReason }
-                      onChange={ (e) => setPostponementReason(e.target.value) }
+                      value={postponementReason}
+                      onChange={(e) => setPostponementReason(e.target.value)}
                       placeholder="أدخل سبب تأجيل المشروع..."
-                      rows={ 4 }
+                      rows={4}
                       className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none resize-none"
                     />
                     <p className="text-xs text-gray-500 mt-1">
@@ -3460,21 +3347,21 @@ const MediaProjectsList = () => {
                   </div>
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={ () => {
+                      onClick={() => {
                         setExecutionStatusAction(null);
                         setPostponementReason('');
-                      } }
-                      disabled={ isPostponing }
+                      }}
+                      disabled={isPostponing}
                       className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors disabled:opacity-50"
                     >
                       رجوع
                     </button>
                     <button
-                      onClick={ handlePostponeFromStatusModal }
-                      disabled={ isPostponing || !postponementReason.trim() }
+                      onClick={handlePostponeFromStatusModal}
+                      disabled={isPostponing || !postponementReason.trim()}
                       className="flex-1 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      { isPostponing ? (
+                      {isPostponing ? (
                         <>
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white ml-2"></div>
                           جاري التأجيل...
@@ -3484,30 +3371,30 @@ const MediaProjectsList = () => {
                           <Pause className="w-4 h-4 ml-2" />
                           تأجيل المشروع
                         </>
-                      ) }
+                      )}
                     </button>
                   </div>
                 </div>
-              ) }
+              )}
             </div>
           </div>
-        ) }
+        )}
 
-        {/* Assign Producer Modal */ }
+        {/* Assign Producer Modal */}
         {
           showAssignModal && selectedProject && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-xl max-w-md w-full">
                 <div className="flex items-center justify-between p-6 border-b border-gray-200">
                   <h2 className="text-xl font-bold text-gray-800">
-                    { selectedProject.assigned_montage_producer_id ? 'إعادة إسناد مشروع لممنتج' : 'إسناد مشروع لممنتج' }
+                    {selectedProject.assigned_montage_producer_id ? 'إعادة إسناد مشروع لممنتج' : 'إسناد مشروع لممنتج'}
                   </h2>
                   <button
-                    onClick={ () => {
+                    onClick={() => {
                       setShowAssignModal(false);
                       setSelectedProject(null);
                       setSelectedProducerId('');
-                    } }
+                    }}
                     className="text-gray-400 hover:text-gray-600"
                   >
                     <X className="w-6 h-6" />
@@ -3518,10 +3405,10 @@ const MediaProjectsList = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       المشروع
                     </label>
-                    <p className="text-gray-900 font-medium">{ selectedProject.project_name || selectedProject.project_description }</p>
-                    <p className="text-sm text-gray-600">كود: { getProjectCode(selectedProject) }</p>
-                    {/* ✅ عرض المنتج الحالي إذا كان المشروع مسنداً */ }
-                    { selectedProject.assigned_montage_producer_id && (
+                    <p className="text-gray-900 font-medium">{selectedProject.project_name || selectedProject.project_description}</p>
+                    <p className="text-sm text-gray-600">كود: {getProjectCode(selectedProject)}</p>
+                    {/* ✅ عرض المنتج الحالي إذا كان المشروع مسنداً */}
+                    {selectedProject.assigned_montage_producer_id && (
                       <p className="text-sm text-orange-600 mt-2">
                         المنتج الحالي: {
                           selectedProject.assigned_montage_producer?.name ||
@@ -3530,47 +3417,47 @@ const MediaProjectsList = () => {
                           'غير محدد'
                         }
                       </p>
-                    ) }
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      { selectedProject.assigned_montage_producer_id ? 'اختر ممنتج جديد' : 'اختر ممنتج' } <span className="text-red-500">*</span>
+                      {selectedProject.assigned_montage_producer_id ? 'اختر ممنتج جديد' : 'اختر ممنتج'} <span className="text-red-500">*</span>
                     </label>
-                    { loadingProducers ? (
+                    {loadingProducers ? (
                       <div className="flex justify-center py-4">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sky-600"></div>
                       </div>
                     ) : (
                       <select
-                        value={ selectedProducerId }
-                        onChange={ (e) => setSelectedProducerId(e.target.value) }
+                        value={selectedProducerId}
+                        onChange={(e) => setSelectedProducerId(e.target.value)}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                         required
                       >
                         <option value="">اختر ممنتج</option>
-                        { producers.map((producer) => (
-                          <option key={ producer.id } value={ producer.id }>
-                            { producer.name }
+                        {producers.map((producer) => (
+                          <option key={producer.id} value={producer.id}>
+                            {producer.name}
                           </option>
-                        )) }
+                        ))}
                       </select>
-                    ) }
+                    )}
                   </div>
                   <div className="flex gap-3 pt-4">
                     <button
-                      onClick={ handleSubmitAssign }
-                      disabled={ loadingAssign || !selectedProducerId }
+                      onClick={handleSubmitAssign}
+                      disabled={loadingAssign || !selectedProducerId}
                       className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:shadow-lg transition-shadow disabled:opacity-50"
                     >
-                      { loadingAssign ? (selectedProject.assigned_montage_producer_id ? 'جاري إعادة الإسناد...' : 'جاري الإسناد...') : (selectedProject.assigned_montage_producer_id ? 'تأكيد إعادة الإسناد' : 'تأكيد الإسناد') }
+                      {loadingAssign ? (selectedProject.assigned_montage_producer_id ? 'جاري إعادة الإسناد...' : 'جاري الإسناد...') : (selectedProject.assigned_montage_producer_id ? 'تأكيد إعادة الإسناد' : 'تأكيد الإسناد')}
                     </button>
                     <button
-                      onClick={ () => {
+                      onClick={() => {
                         setShowAssignModal(false);
                         setSelectedProject(null);
                         setSelectedProducerId('');
-                      } }
-                      disabled={ loadingAssign }
+                      }}
+                      disabled={loadingAssign}
                       className="px-6 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       إلغاء

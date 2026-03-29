@@ -140,7 +140,7 @@ class ProjectProposalService
                 }
                 if (!isset($projectData['total_months']) && isset($phaseDivision['total_months'])) {
                     $val = $phaseDivision['total_months'];
-                    if ($val !== null && $val !== '' && is_numeric($val) && (int)$val > 0) {
+                    if ($val !== null && $val !== '' && is_numeric($val) && (int) $val > 0) {
                         $projectData['total_months'] = (int) $val;
                     }
                 }
@@ -149,7 +149,7 @@ class ProjectProposalService
                 }
                 if (!isset($projectData['phase_duration_days']) && isset($phaseDivision['phase_duration_days'])) {
                     $val = $phaseDivision['phase_duration_days'];
-                    if ($val !== null && $val !== '' && is_numeric($val) && (int)$val > 0) {
+                    if ($val !== null && $val !== '' && is_numeric($val) && (int) $val > 0) {
                         $projectData['phase_duration_days'] = (int) $val;
                     }
                 }
@@ -172,20 +172,24 @@ class ProjectProposalService
 
             if ($hasTotalMonths) {
                 $totalMonths = $request->input('total_months') ?? ($projectData['total_months'] ?? null);
-                if ($totalMonths !== null && $totalMonths !== '' && is_numeric($totalMonths) && (int)$totalMonths > 0) {
+                if ($totalMonths !== null && $totalMonths !== '' && is_numeric($totalMonths) && (int) $totalMonths > 0) {
                     $projectData['total_months'] = (int) $totalMonths;
-                } elseif (isset($projectData['is_divided_into_phases']) && $projectData['is_divided_into_phases']
-                    && isset($projectData['phase_type']) && $projectData['phase_type'] === self::PHASE_TYPE_MONTHLY) {
+                } elseif (
+                    isset($projectData['is_divided_into_phases']) && $projectData['is_divided_into_phases']
+                    && isset($projectData['phase_type']) && $projectData['phase_type'] === self::PHASE_TYPE_MONTHLY
+                ) {
                     unset($projectData['total_months']);
                 }
             }
 
             if ($hasPhaseDurationDays) {
                 $phaseDurationDays = $request->input('phase_duration_days') ?? ($projectData['phase_duration_days'] ?? null);
-                if ($phaseDurationDays !== null && $phaseDurationDays !== '' && is_numeric($phaseDurationDays) && (int)$phaseDurationDays > 0) {
+                if ($phaseDurationDays !== null && $phaseDurationDays !== '' && is_numeric($phaseDurationDays) && (int) $phaseDurationDays > 0) {
                     $projectData['phase_duration_days'] = (int) $phaseDurationDays;
-                } elseif (isset($projectData['is_divided_into_phases']) && $projectData['is_divided_into_phases']
-                    && isset($projectData['phase_type']) && $projectData['phase_type'] === self::PHASE_TYPE_DAILY) {
+                } elseif (
+                    isset($projectData['is_divided_into_phases']) && $projectData['is_divided_into_phases']
+                    && isset($projectData['phase_type']) && $projectData['phase_type'] === self::PHASE_TYPE_DAILY
+                ) {
                     if (config('app.debug')) {
                         Log::warning('phase_duration_days is missing for daily divided project');
                     }
@@ -198,9 +202,11 @@ class ProjectProposalService
                 $phaseStartDate = $request->input('phase_start_date') ?? ($projectData['phase_start_date'] ?? null);
                 if ($phaseStartDate !== null && $phaseStartDate !== '') {
                     $projectData['phase_start_date'] = $this->normalizePhaseStartDate($phaseStartDate);
-                } elseif (isset($projectData['is_divided_into_phases']) && $projectData['is_divided_into_phases']
+                } elseif (
+                    isset($projectData['is_divided_into_phases']) && $projectData['is_divided_into_phases']
                     && isset($projectData['phase_type']) && $projectData['phase_type'] === self::PHASE_TYPE_MONTHLY
-                    && !empty($projectData['total_months'])) {
+                    && !empty($projectData['total_months'])
+                ) {
                     // مشروع مقسم شهرياً بدون تاريخ بداية: استخدام أول يوم من الشهر الحالي لإنشاء الشهور الفرعية
                     $projectData['phase_start_date'] = Carbon::now()->startOfMonth()->format('Y-m-d');
                     Log::info('Monthly divided project: phase_start_date set to start of current month', [
@@ -232,17 +238,35 @@ class ProjectProposalService
         // ✅ الحقول المحسوبة والعلاقات التي يجب إزالتها
         $excludedFields = [
             // الحقول المحسوبة (accessors) - ليست حقول فعلية في قاعدة البيانات
-            'is_delayed', 'delayed_days', 'calculated_beneficiaries',
-            'remaining_days', 'notes_image_url', 'notes_image_download_url',
+            'is_delayed',
+            'delayed_days',
+            'calculated_beneficiaries',
+            'remaining_days',
+            'notes_image_url',
+            'notes_image_download_url',
             // العلاقات (relationships) - لا يجب تحديثها مباشرة
-            'currency', 'subcategory', 'creator', 'shelter', 'projectType',
-            'assignedToTeam', 'assignedResearcher', 'photographer',
-            'assignedMontageProducer', 'assignedBy', 'surplusRecorder',
-            'warehouseItems', 'confirmedWarehouseItems', 'pendingWarehouseItems',
-            'timeline', 'dailyPhases', 'monthlyPhases', 'parentProject',
-            'project', 'surplusCategory'
+            'currency',
+            'subcategory',
+            'creator',
+            'shelter',
+            'projectType',
+            'assignedToTeam',
+            'assignedResearcher',
+            'photographer',
+            'assignedMontageProducer',
+            'assignedBy',
+            'surplusRecorder',
+            'warehouseItems',
+            'confirmedWarehouseItems',
+            'pendingWarehouseItems',
+            'timeline',
+            'dailyPhases',
+            'monthlyPhases',
+            'parentProject',
+            'project',
+            'surplusCategory'
         ];
-        
+
         $importantFields = [
             'is_divided_into_phases',
             'phase_type',
@@ -263,7 +287,7 @@ class ProjectProposalService
             if (in_array($key, $excludedFields)) {
                 continue;
             }
-            
+
             if (in_array($key, $importantFields)) {
                 $cleanedData[$key] = $value;
             } elseif ($value === false || $value === 0 || $value === '0') {
@@ -302,7 +326,7 @@ class ProjectProposalService
             return in_array($lower, ['1', 'true', 'yes', 'on', 'y']);
         }
         if (is_numeric($value)) {
-            return (int)$value !== 0;
+            return (int) $value !== 0;
         }
         return $default;
     }
@@ -347,7 +371,7 @@ class ProjectProposalService
         try {
             // Get currency
             $currency = Currency::findOrFail($request->currency_id);
-            
+
             // Get project type
             $projectTypeResult = $this->getProjectTypeFromRequest($request);
             if ($projectTypeResult['error']) {
@@ -358,7 +382,7 @@ class ProjectProposalService
                 ];
             }
             $projectType = $projectTypeResult['projectType'];
-            
+
             // Validate subcategory
             $subcategoryError = $this->validateSubcategory($request, $projectType);
             if ($subcategoryError) {
@@ -368,7 +392,7 @@ class ProjectProposalService
                     'code' => $subcategoryError['code']
                 ];
             }
-            
+
             // Prepare project data (include phase fields so divided projects get them from request)
             $projectData = $request->only([
                 'donor_code',
@@ -385,36 +409,36 @@ class ProjectProposalService
                 'beneficiaries_per_unit',
                 'notes'
             ]);
-            
+
             // Remove calculated amounts (calculated in Model)
             unset($projectData['amount_in_usd']);
             unset($projectData['discount_amount']);
             unset($projectData['net_amount']);
-            
+
             // Process is_divided_into_phases
             if ($request->has('is_divided_into_phases')) {
                 $projectData['is_divided_into_phases'] = $this->normalizeBoolean($request->input('is_divided_into_phases'), false);
             } else {
                 $projectData['is_divided_into_phases'] = false;
             }
-            
+
             // Process is_urgent
             if ($request->has('is_urgent')) {
                 $projectData['is_urgent'] = $this->normalizeBoolean($request->input('is_urgent'), false);
             } else {
                 $projectData['is_urgent'] = false;
             }
-            
+
             // Process phase fields
             $projectData = $this->processPhaseFields($request, $projectData);
-            
+
             // Remove internal_code (auto-generated)
             unset($projectData['internal_code']);
-            
+
             // Add project type
             $projectData['project_type_id'] = $projectType->id;
             $projectData['project_type'] = $projectType->name;
-            
+
             // Process project_description
             $projectDescription = $request->input('project_description');
             if ($projectDescription !== null && trim($projectDescription) === '') {
@@ -422,12 +446,12 @@ class ProjectProposalService
             } elseif ($projectDescription !== null) {
                 $projectData['project_description'] = $projectDescription;
             }
-            
+
             // Add notes image if uploaded
             if ($request->has('notes_image_path')) {
                 $projectData['notes_image'] = $request->input('notes_image_path');
             }
-            
+
             // Build project name
             if (!empty($request->input('project_name'))) {
                 $projectData['project_name'] = Str::limit(trim($request->input('project_name')), 255);
@@ -438,26 +462,26 @@ class ProjectProposalService
                     $request->input('project_type')
                 );
             }
-            
+
             $projectData['exchange_rate'] = $currency->exchange_rate_to_usd;
             $projectData['created_by'] = $user->id;
             $projectData['status'] = self::STATUS_NEW;
-            
+
             // Clean project data
             $projectTypeId = $projectData['project_type_id'] ?? null;
             $projectData = $this->cleanProjectData($projectData);
-            
+
             // Ensure project_type_id is preserved
             if ($projectTypeId !== null && $projectTypeId !== '') {
                 $projectData['project_type_id'] = $projectTypeId;
             }
-            
+
             // إنشاء المشروع والمراحل الشهرية/اليومية داخل معاملة واحدة (إما كل شيء ينجح أو يتم التراجع)
             $txResult = DB::transaction(function () use ($projectData, $user) {
                 $project = ProjectProposal::create($projectData);
-                
+
                 $project->recordStatusChange(null, self::STATUS_NEW, $user->id, 'تم إنشاء المشروع');
-                
+
                 $phaseResult = null;
                 // ✅ منطق مبسط وواضح لإنشاء المراحل اليومية/الشهرية
                 if ($project->is_divided_into_phases) {
@@ -468,7 +492,7 @@ class ProjectProposalService
                             $project->phase_start_date = Carbon::today()->format('Y-m-d');
                             $project->save();
                         }
-                        
+
                         $dailyPhases = $project->createDailyPhases();
                         if ($dailyPhases && $dailyPhases->count() > 0) {
                             $project->load(['currency', 'creator', 'dailyPhases']);
@@ -483,7 +507,7 @@ class ProjectProposalService
                     elseif ($project->phase_type === self::PHASE_TYPE_MONTHLY && $project->total_months) {
                         $firstMonthlyPhase = $project->createMonthlyPhases();
                         $monthlyCount = $project->monthlyPhases()->count();
-                        
+
                         if ($monthlyCount > 0) {
                             $project->load(['currency', 'creator', 'monthlyPhases']);
                             $phaseResult = [
@@ -511,14 +535,14 @@ class ProjectProposalService
                         ]);
                     }
                 }
-                
+
                 if (!$phaseResult) {
                     $project->load(['currency', 'creator']);
                 }
-                
+
                 return ['project' => $project, 'phase_result' => $phaseResult];
             });
-            
+
             $project = $txResult['project'];
             $phaseResult = $txResult['phase_result'];
 
@@ -552,13 +576,13 @@ class ProjectProposalService
                 'serial_number' => $verified->serial_number,
                 'phase_result' => $phaseResult
             ];
-            
+
         } catch (\Illuminate\Database\QueryException $e) {
             Log::error('Database error when creating project', [
                 'error' => $e->getMessage(),
                 'sql_state' => $e->getCode()
             ]);
-            
+
             return [
                 'success' => false,
                 'error' => $this->handleDatabaseException($e),
@@ -569,7 +593,7 @@ class ProjectProposalService
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return [
                 'success' => false,
                 'error' => $this->handleDatabaseException($e),
@@ -584,21 +608,21 @@ class ProjectProposalService
     private function handleDatabaseException(\Exception $e): string
     {
         $errorMessage = $e->getMessage();
-        
+
         if (str_contains($errorMessage, 'Column not found') || str_contains($errorMessage, 'Unknown column')) {
             return 'يبدو أن بعض الحقول غير موجودة في قاعدة البيانات. يرجى تطبيق Migration أو SQL Script.';
         }
-        
+
         if (str_contains($errorMessage, 'Data truncated')) {
             preg_match("/Data truncated for column '([^']+)'/", $errorMessage, $matches);
             $problematicColumn = $matches[1] ?? 'unknown';
             return "القيمة المرسلة للحقل '{$problematicColumn}' غير صحيحة. يرجى التحقق من البيانات.";
         }
-        
+
         if (str_contains($errorMessage, 'internal_code')) {
             return 'خطأ في توليد الكود الداخلي. يرجى التأكد من تشغيل migration لإضافة حقل internal_code.';
         }
-        
+
         return config('app.debug') ? $errorMessage : 'حدث خطأ أثناء العملية';
     }
 
@@ -610,13 +634,13 @@ class ProjectProposalService
         // Text search
         if ($request->has('search') && !empty($request->search)) {
             $searchTerm = $request->search;
-            $query->where(function($q) use ($searchTerm) {
+            $query->where(function ($q) use ($searchTerm) {
                 $q->where('project_name', 'LIKE', "%{$searchTerm}%")
-                  ->orWhere('donor_code', 'LIKE', "%{$searchTerm}%")
-                  ->orWhere('internal_code', 'LIKE', "%{$searchTerm}%")
-                  ->orWhere('donor_name', 'LIKE', "%{$searchTerm}%")
-                  ->orWhere('project_description', 'LIKE', "%{$searchTerm}%")
-                  ->orWhere('serial_number', 'LIKE', "%{$searchTerm}%");
+                    ->orWhere('donor_code', 'LIKE', "%{$searchTerm}%")
+                    ->orWhere('internal_code', 'LIKE', "%{$searchTerm}%")
+                    ->orWhere('donor_name', 'LIKE', "%{$searchTerm}%")
+                    ->orWhere('project_description', 'LIKE', "%{$searchTerm}%")
+                    ->orWhere('serial_number', 'LIKE', "%{$searchTerm}%");
             });
         }
 
@@ -682,7 +706,7 @@ class ProjectProposalService
             $isUrgent = $this->normalizeBoolean($request->input('is_urgent'), false);
             $query->where('is_urgent', $isUrgent);
         }
-        
+
         return $query;
     }
 
@@ -693,29 +717,61 @@ class ProjectProposalService
     {
         // ✅ إزالة الحقول المحسوبة والعلاقات التي لا يجب تحديثها
         $excludedFields = [
-            '_method', '_token', 'notes_image', 'project_image',
+            '_method',
+            '_token',
+            'notes_image',
+            'project_image',
             // الحقول المحسوبة (accessors) - ليست حقول فعلية في قاعدة البيانات
-            'is_delayed', 'delayed_days', 'calculated_beneficiaries',
-            'remaining_days', 'notes_image_url', 'notes_image_download_url',
+            'is_delayed',
+            'delayed_days',
+            'calculated_beneficiaries',
+            'remaining_days',
+            'notes_image_url',
+            'notes_image_download_url',
             // العلاقات (relationships) - لا يجب تحديثها مباشرة
-            'currency', 'subcategory', 'creator', 'shelter', 'projectType',
-            'assignedToTeam', 'assignedResearcher', 'photographer',
-            'assignedMontageProducer', 'assignedBy', 'surplusRecorder',
-            'warehouseItems', 'confirmedWarehouseItems', 'pendingWarehouseItems',
-            'timeline', 'dailyPhases', 'monthlyPhases', 'parentProject',
-            'project', 'surplusCategory'
+            'currency',
+            'subcategory',
+            'creator',
+            'shelter',
+            'projectType',
+            'assignedToTeam',
+            'assignedResearcher',
+            'photographer',
+            'assignedMontageProducer',
+            'assignedBy',
+            'surplusRecorder',
+            'warehouseItems',
+            'confirmedWarehouseItems',
+            'pendingWarehouseItems',
+            'timeline',
+            'dailyPhases',
+            'monthlyPhases',
+            'parentProject',
+            'project',
+            'surplusCategory'
         ];
-        
+
         $updateData = $request->except($excludedFields);
-        
+
         // Nullable fields
         $nullableFields = [
-            'project_description', 'donor_code', 'internal_code', 'donor_name',
-            'notes', 'rejection_reason', 'rejection_message', 'admin_rejection_reason',
-            'media_rejection_reason', 'surplus_notes',
-            'shelter_id', 'assigned_to_team_id', 'assigned_researcher_id',
-            'assigned_photographer_id', 'assigned_montage_producer_id',
-            'subcategory_id', 'project_type_id'
+            'project_description',
+            'donor_code',
+            'internal_code',
+            'donor_name',
+            'notes',
+            'rejection_reason',
+            'rejection_message',
+            'admin_rejection_reason',
+            'media_rejection_reason',
+            'surplus_notes',
+            'shelter_id',
+            'assigned_to_team_id',
+            'assigned_researcher_id',
+            'assigned_photographer_id',
+            'assigned_montage_producer_id',
+            'subcategory_id',
+            'project_type_id'
         ];
 
         foreach ($nullableFields as $field) {
@@ -727,10 +783,17 @@ class ProjectProposalService
 
         // Date fields
         $dateFields = [
-            'execution_date', 'media_received_date', 'montage_start_date',
-            'montage_completed_date', 'sent_to_donor_date', 'completed_date',
-            'assignment_date', 'phase_start_date', 'month_start_date',
-            'shekel_converted_at', 'surplus_recorded_at'
+            'execution_date',
+            'media_received_date',
+            'montage_start_date',
+            'montage_completed_date',
+            'sent_to_donor_date',
+            'completed_date',
+            'assignment_date',
+            'phase_start_date',
+            'month_start_date',
+            'shekel_converted_at',
+            'surplus_recorded_at'
         ];
 
         foreach ($dateFields as $field) {
@@ -745,7 +808,7 @@ class ProjectProposalService
             $newStatus = $request->input('status');
             $updateData['status'] = $newStatus;
             $now = now()->toDateString();
-            
+
             $statusDateMap = [
                 'تم التنفيذ' => 'execution_date',
                 'في المونتاج' => 'montage_start_date',
@@ -763,8 +826,12 @@ class ProjectProposalService
 
         // Boolean fields
         $booleanFields = [
-            'is_divided_into_phases', 'is_daily_phase', 'is_monthly_phase',
-            'has_deficit', 'transferred_to_projects', 'is_urgent'
+            'is_divided_into_phases',
+            'is_daily_phase',
+            'is_monthly_phase',
+            'has_deficit',
+            'transferred_to_projects',
+            'is_urgent'
         ];
 
         foreach ($booleanFields as $field) {
@@ -775,12 +842,26 @@ class ProjectProposalService
 
         // Numeric fields
         $numericFields = [
-            'donation_amount', 'exchange_rate', 'amount_in_usd', 'admin_discount_percentage',
-            'discount_amount', 'net_amount', 'shekel_exchange_rate', 'net_amount_shekel',
-            'quantity', 'beneficiaries_count', 'beneficiaries_per_unit', 'unit_cost',
-            'supply_cost', 'surplus_amount', 'satisfaction_shortfall',
-            'estimated_duration_days', 'phase_duration_days', 'total_months',
-            'month_number', 'phase_day'
+            'donation_amount',
+            'exchange_rate',
+            'amount_in_usd',
+            'admin_discount_percentage',
+            'discount_amount',
+            'net_amount',
+            'shekel_exchange_rate',
+            'net_amount_shekel',
+            'quantity',
+            'beneficiaries_count',
+            'beneficiaries_per_unit',
+            'unit_cost',
+            'supply_cost',
+            'surplus_amount',
+            'satisfaction_shortfall',
+            'estimated_duration_days',
+            'phase_duration_days',
+            'total_months',
+            'month_number',
+            'phase_day'
         ];
 
         foreach ($numericFields as $field) {
@@ -800,7 +881,7 @@ class ProjectProposalService
     {
         $updateData = [];
         $now = now()->toDateString();
-        
+
         switch ($newStatus) {
             case 'تم التنفيذ':
                 if (!$project->execution_date) {
@@ -832,7 +913,7 @@ class ProjectProposalService
                 }
                 break;
         }
-        
+
         return $updateData;
     }
 
@@ -848,7 +929,7 @@ class ProjectProposalService
     {
         $cleanupData = [];
         $warehouseItemsToDelete = false;
-        
+
         // ترتيب الحالات من الأقدم إلى الأحدث
         $statusOrder = [
             'جديد' => 1,
@@ -868,18 +949,18 @@ class ProjectProposalService
             'ملغى' => 0,
             'مؤجل' => 0,
         ];
-        
+
         $currentStatusOrder = $statusOrder[$project->status] ?? 0;
         $newStatusOrder = $statusOrder[$newStatus] ?? 0;
-        
+
         // ✅ الحالات الخاصة (ملغى، مؤجل) لا تحذف البيانات
         if ($newStatus === 'ملغى' || $newStatus === 'مؤجل') {
             return [];
         }
-        
+
         // إذا كانت الحالة الجديدة قبل الحالة الحالية (رجوع للخلف)، نحذف البيانات
         if ($newStatusOrder > 0 && $currentStatusOrder > 0 && $newStatusOrder < $currentStatusOrder) {
-            
+
             // ✅ إذا رجع إلى "جديد" - حذف كل شيء وتبقى بيانات المشروع عند الإنشاء فقط
             if ($newStatusOrder <= 1) {
                 $cleanupData = [
@@ -1126,12 +1207,12 @@ class ProjectProposalService
                 ];
             }
         }
-        
+
         // ✅ إضافة علامة لحذف warehouse items إذا لزم الأمر
         if ($warehouseItemsToDelete) {
             $cleanupData['_delete_warehouse_items'] = true;
         }
-        
+
         return $cleanupData;
     }
 }
